@@ -15,6 +15,15 @@ This is football research, not betting advice. No pick is guaranteed.
 3. The first launch sets up a private environment and downloads the nflverse data (a few minutes). Your browser then opens http://127.0.0.1:8765.
    Later launches refresh this season's files and open in under a minute. Keep the small window open while you use the app; close it to stop.
 
+## Free hosted website (no install at all)
+
+The same interface can run as a free, read-only website that rebuilds itself from fresh nflverse data.
+
+- `.github/workflows/publish-site.yml` runs Tuesday, Thursday, Saturday and Sunday mornings (and on demand from the **Actions** tab). It downloads the data, runs the import, walk-forward validation and predictions, runs the tests, pre-renders every page's data (`python -m engine.export_static`), builds the interface with `VITE_STATIC=1` and publishes it to GitHub Pages. If any step fails, nothing is published and the previous site stays up.
+- One-time setup on a **public** GitHub repository: Settings → Pages → Source: **GitHub Actions**, then run the workflow once from the Actions tab. The site appears at `https://<user>.github.io/<repo>/`. GitHub Pages on a private repository needs a paid plan; for a private repo, deploy the same `frontend/dist` folder to Cloudflare Pages instead.
+- On the website, filtering, sorting, paging and Top 3 exclude-and-replace run in the browser on the published numbers. Locked selections are saved in that browser only (append-only) and export to CSV. Data import and Venom import are desktop-only. Player pages are published for the latest week.
+- Local preview: `cd backend && python -m engine.export_static && cd ../frontend && VITE_STATIC=1 npm run build && cp -r ../site-data dist/data && npx vite preview`.
+
 ## Quick start (developers)
 
 ```bash
