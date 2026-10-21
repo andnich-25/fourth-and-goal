@@ -1,0 +1,11 @@
+policy,slots_per_week,hits,picks,hit_rate,wilson95_low,wilson95_high,comparison_note
+Opportunity (rush attempts + receptions),1,3,4,0.75,0.30064184258240184,0.9544127391902995,"EXPLORATORY, elite-player cohort; not prospective validation"
+Opportunity (rush attempts + receptions),2,6,8,0.75,0.40927543031016883,0.9285207872478909,"EXPLORATORY, elite-player cohort; not prospective validation"
+Opportunity (rush attempts + receptions),3,8,12,0.6666666666666666,0.39062208887279953,0.8618799089087867,"EXPLORATORY, elite-player cohort; not prospective validation"
+Opportunity (rush attempts + receptions),5,12,20,0.6,0.3865815007622531,0.781193467627183,"EXPLORATORY, elite-player cohort; not prospective validation"
+Opportunity (rush attempts + receptions),10,26,40,0.65,0.49505880837257693,0.7786547112682372,"EXPLORATORY, elite-player cohort; not prospective validation"
+Smoothed recent TD rate,1,3,4,0.75,0.30064184258240184,0.9544127391902995,"EXPLORATORY, elite-player cohort; not prospective validation"
+Smoothed recent TD rate,2,6,8,0.75,0.40927543031016883,0.9285207872478909,"EXPLORATORY, elite-player cohort; not prospective validation"
+Smoothed recent TD rate,3,9,12,0.75,0.46769466506643426,0.9110583316059453,"EXPLORATORY, elite-player cohort; not prospective validation"
+Smoothed recent TD rate,5,12,20,0.6,0.3865815007622531,0.781193467627183,"EXPLORATORY, elite-player cohort; not prospective validation"
+Smoothed recent TD rate,10,25,40,0.625,0.47032439137301096,0.7577702083276673,"EXPLORATORY, elite-player cohort; not prospective validation"

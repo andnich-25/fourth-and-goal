@@ -1,0 +1,10 @@
+data/raw/*
+!data/raw/.gitkeep
+data/*.sqlite*
+data/results/
+frontend/node_modules/
+frontend/dist/
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/

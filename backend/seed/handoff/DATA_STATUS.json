@@ -1,0 +1,14 @@
+{
+  "as_of": "2026-10-21",
+  "season": 2026,
+  "prediction_week": 7,
+  "complete_2026_nflverse_pbp_imported": false,
+  "complete_2023_2025_nflverse_pbp_imported": false,
+  "full_league_xtd_calculated": false,
+  "full_league_model_calibrated": false,
+  "pilot_players": 26,
+  "pilot_is_representative": false,
+  "venom_screenshots_only": true,
+  "synthetic_test_results_are_not_real_statistics": true,
+  "ready_for_production_prediction": false
+}

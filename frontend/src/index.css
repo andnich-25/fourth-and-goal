@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 246 247 249;
+  --surface: 255 255 255;
+  --raised: 240 243 246;
+  --line: 222 227 233;
+  --fg: 14 22 33;
+  --muted: 91 104 120;
+  --accent: 63 125 22;
+  --accent-fg: 255 255 255;
+  --warn: 176 110 0;
+  --danger: 196 43 43;
+  --info: 37 99 199;
+  --ok: 30 130 76;
+  color-scheme: light;
+}
+.dark {
+  --bg: 11 16 24;
+  --surface: 20 30 41;
+  --raised: 27 39 53;
+  --line: 38 52 68;
+  --fg: 244 247 250;
+  --muted: 147 162 180;
+  --accent: 155 225 93;
+  --accent-fg: 11 16 24;
+  --warn: 240 184 76;
+  --danger: 248 113 113;
+  --info: 125 176 255;
+  --ok: 110 214 150;
+  color-scheme: dark;
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body { @apply bg-bg text-fg font-sans antialiased; font-feature-settings: "cv11", "ss01"; }
+  :focus-visible { @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-bg; }
+  .num { font-variant-numeric: tabular-nums; }
+  ::selection { background: rgb(var(--accent) / 0.3); }
+}
+
+@layer components {
+  .card { @apply rounded-xl border border-line bg-surface; }
+  .label { @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-muted; }
+  .skeleton { @apply animate-pulse rounded-md bg-raised; }
+}
