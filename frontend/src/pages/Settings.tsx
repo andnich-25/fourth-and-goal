@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Upload } from "lucide-react";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, STATIC } from "@/lib/api";
 import { chicago, pct } from "@/lib/format";
 import { useSeasonWeek, useTheme, type Theme } from "@/lib/state";
 import { PageTitle } from "@/components/Layout";
@@ -39,6 +39,7 @@ export default function SettingsPage() {
       <Card>
         <CardHeader title="Manual Venom snapshot import" subtitle="Optional supplementary data from your own screenshots. Stored for one week only and never used in training or backtests." />
         <CardBody className="space-y-4">
+          {STATIC && <Notice tone="warn" title="Read-only on the website">Venom imports need the desktop app. The table below shows the snapshots published with this build.</Notice>}
           <Notice tone="info">Venom Score is a ranking number (0–100), not a probability. Do not read a score of 90 as a 90% chance. No private API is used: paste or upload a CSV you transcribed.</Notice>
           <div className="flex flex-wrap items-end gap-3">
             <label className="text-sm"><span className="label block">Season</span><Input type="number" value={s} onChange={(e) => setS(Number(e.target.value))} className="w-24" /></label>
@@ -53,7 +54,7 @@ export default function SettingsPage() {
               className="w-full rounded-lg border border-line bg-surface p-3 font-mono text-xs" />
           </label>
           <p className="text-xs text-muted">Columns: {(v.data?.template_columns ?? []).join(", ")}. Re-importing the same player/week/date updates that row.</p>
-          <Button variant="primary" onClick={() => imp.mutate()} disabled={!text.trim()} loading={imp.isPending}>Validate &amp; import for {s} Week {w}</Button>
+          <Button variant="primary" onClick={() => imp.mutate()} disabled={STATIC || !text.trim()} loading={imp.isPending}>Validate &amp; import for {s} Week {w}</Button>
           {imp.isSuccess && <p className="text-sm text-accent">Imported {imp.data.inserted} rows{imp.data.errors.length ? `; skipped: ${imp.data.errors.join("; ")}` : ""}.</p>}
           {imp.isError && <p className="text-sm text-danger">{imp.error instanceof ApiError ? imp.error.message : String(imp.error)}</p>}
         </CardBody>

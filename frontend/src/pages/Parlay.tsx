@@ -183,7 +183,7 @@ export default function ParlayPage() {
 
       <Card>
         <CardHeader title="Locked selections" subtitle="Immutable pregame snapshots, graded once games finish"
-          action={<a href={api.url("/export/locks.csv")} download><Button size="sm" variant="outline"><Download className="h-3.5 w-3.5" /> CSV</Button></a>} />
+          action={<Button size="sm" variant="outline" onClick={() => api.download("/export/locks.csv")}><Download className="h-3.5 w-3.5" /> CSV</Button>} />
         {locks.isLoading && <LoadingBlock className="p-4" />}
         {locks.data?.length === 0 && <p className="p-5 text-sm text-muted">Nothing locked for {season} yet.</p>}
         <ul className="divide-y divide-line">

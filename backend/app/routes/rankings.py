@@ -73,7 +73,7 @@ def _row(r, calibrated, venom) -> RankingRow:
 @router.get("/rankings", response_model=RankingsResponse)
 def rankings(season: int | None = None, week: int | None = None, position: list[str] = Query(default=[]),
              team: str | None = None, search: str | None = None, eligible_only: bool = True, sort: str = "rank",
-             order: str = "asc", page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
+             order: str = "asc", page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=2000),
              c: sqlite3.Connection = Depends(get_db)):
     ds, dw = default_season_week(c)
     season, week = season or ds, week or dw

@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Circle, Copy, Download, FileWarning, Play, Terminal, XCircle } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, STATIC } from "@/lib/api";
 import { chicago, cn, int } from "@/lib/format";
 import type { DataStatus, Job } from "@/lib/types";
 import { PageTitle } from "@/components/Layout";
@@ -19,7 +19,7 @@ export default function DataSyncPage() {
   const [download, setDownload] = React.useState(false);
   const [force, setForce] = React.useState(false);
   const [jobId, setJobId] = React.useState<string | null>(null);
-  const jobs = useQuery({ queryKey: ["jobs"], queryFn: () => api.get<Job[]>("/data/jobs") });
+  const jobs = useQuery({ queryKey: ["jobs"], enabled: !STATIC, queryFn: () => api.get<Job[]>("/data/jobs") });
   React.useEffect(() => {
     const running = jobs.data?.find((j) => j.status === "running" || j.status === "queued");
     if (running && !jobId) setJobId(running.job_id);
@@ -76,6 +76,17 @@ export default function DataSyncPage() {
           )}
 
           <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
+            {STATIC ? (
+            <Card>
+              <CardHeader title="Automatic refresh" icon={<Play className="h-4 w-4 text-accent" />} subtitle="This website is read-only and rebuilds itself" />
+              <CardBody className="space-y-3 text-sm text-muted">
+                <p>A scheduled job downloads the latest nflverse files, re-runs the import, walk-forward validation and predictions, and republishes
+                  the site every Tuesday and Saturday morning (and before Thursday games). The numbers here are exactly what that run produced.</p>
+                <p>Last build: <span className="text-fg">{chicago(d.generated_at)}</span>. Locked selections are saved in this browser only, so they do
+                  not appear on another device. Use the CSV export to keep a copy.</p>
+              </CardBody>
+            </Card>
+            ) : (
             <Card>
               <CardHeader title="Run import" icon={<Play className="h-4 w-4 text-accent" />} subtitle="The backend runs the CLI worker in the background; this page never touches files directly." />
               <CardBody className="space-y-4">
@@ -100,6 +111,7 @@ export default function DataSyncPage() {
                 )}
               </CardBody>
             </Card>
+            )}
             <Card>
               <CardHeader title="Command line" icon={<Terminal className="h-4 w-4 text-muted" />} subtitle="Same worker, run directly" />
               <CardBody>

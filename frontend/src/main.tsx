@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, HashRouter, Route, Routes } from "react-router-dom";
 import "./index.css";
 import { Layout } from "./components/Layout";
 import { PinProvider } from "./lib/state";
@@ -15,6 +15,10 @@ import Backtest from "./pages/Backtest";
 import DataSync from "./pages/DataSync";
 import SettingsPage from "./pages/Settings";
 import { EmptyState } from "./components/ui";
+import { STATIC } from "./lib/api";
+
+// The hosted website uses #/ routes so any static host (GitHub Pages, Cloudflare Pages) can serve every page.
+const Router = STATIC ? HashRouter : BrowserRouter;
 
 const qc = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1, refetchOnWindowFocus: false, placeholderData: (prev: unknown) => prev } },
@@ -23,7 +27,7 @@ const qc = new QueryClient({
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={qc}>
-      <BrowserRouter>
+      <Router>
         <PinProvider>
           <Routes>
             <Route element={<Layout />}>
@@ -40,7 +44,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             </Route>
           </Routes>
         </PinProvider>
-      </BrowserRouter>
+      </Router>
     </QueryClientProvider>
   </React.StrictMode>,
 );

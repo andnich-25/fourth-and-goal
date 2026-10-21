@@ -4,6 +4,8 @@ import path from "node:path";
 
 export default defineConfig({
   plugins: [react()],
+  // The static website build uses relative asset paths so it works from any subpath (e.g. user.github.io/repo/).
+  base: process.env.VITE_STATIC ? "./" : "/",
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   server: {
     port: 5173,

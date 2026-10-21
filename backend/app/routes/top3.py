@@ -44,7 +44,7 @@ def weekly_top3(season: int | None = None, week: int | None = None, exclude: lis
                 "empty_reason": "No league-wide prediction run for this week yet. Load data on the Data page.",
                 "rules": predict.rules(False)}
     res = predict.top3(c, run["run_id"], set(exclude))
-    for leg in res["legs"]:
+    for leg in res["legs"] + res.get("alternates", []):
         g = c.execute("SELECT gameday, gametime FROM games WHERE game_id=?", (leg["game_id"],)).fetchone()
         ko = kickoff_utc(g["gameday"], g["gametime"]) if g else None
         leg["kickoff_utc"] = ko.isoformat() if ko else None

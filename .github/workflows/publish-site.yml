@@ -1,0 +1,88 @@
+# Rebuilds the free hosted website from fresh nflverse data and publishes it to GitHub Pages.
+# Runs Tuesday morning (after Monday night), Thursday morning (injury reports, before TNF),
+# Saturday morning and Sunday morning (final injury designations), plus on demand from the Actions tab.
+name: Refresh data and publish site
+
+on:
+  schedule:
+    - cron: "0 12 * * 2"   # Tue 12:00 UTC
+    - cron: "0 15 * * 4"   # Thu 15:00 UTC
+    - cron: "0 15 * * 6"   # Sat 15:00 UTC
+    - cron: "0 14 * * 0"   # Sun 14:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Older seasons never change; keeping them between runs avoids re-downloading them.
+      # Current-season files and the schedule are refreshed by the importer when older than 6 hours.
+      - name: Restore downloaded nflverse files
+        uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: nflverse-raw-${{ github.run_id }}
+          restore-keys: nflverse-raw-
+
+      - name: Install backend
+        run: pip install -r backend/requirements.txt
+
+      - name: Download, import, validate and predict
+        working-directory: backend
+        run: python -m engine.cli all --download
+
+      - name: Check engine invariants
+        working-directory: backend
+        run: python -m pytest -q
+
+      - name: Export every page's data
+        working-directory: backend
+        run: python -m engine.export_static
+
+      - name: Build website
+        working-directory: frontend
+        env:
+          VITE_STATIC: "1"
+        run: |
+          npm ci
+          npm run build
+          cp -r ../site-data dist/data
+          touch dist/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

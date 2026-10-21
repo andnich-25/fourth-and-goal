@@ -8,7 +8,10 @@ export class ApiError extends Error {
   }
 }
 
-type Params = Record<string, string | number | boolean | null | undefined | (string | number)[]>;
+import { staticDownload, staticGet, staticPost, type Params } from "./static";
+
+/** True in the hosted website build (VITE_STATIC=1): read-only, pre-rendered data. */
+export const STATIC = !!import.meta.env.VITE_STATIC;
 
 export function qs(params: Params = {}): string {
   const sp = new URLSearchParams();
@@ -39,11 +42,20 @@ async function handle<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export const api = {
+export const api = STATIC ? {
+  get: <T>(path: string, params?: Params) => staticGet<T>(path, params).catch(toApiError),
+  post: <T>(path: string, body: unknown) => staticPost<T>(path, body).catch(toApiError),
+  download: (path: string, params?: Params) => staticDownload(path, params),
+} : {
   get: <T>(path: string, params?: Params) => fetch(`/api${path}${qs(params)}`).then((r) => handle<T>(r)),
   post: <T>(path: string, body: unknown) =>
     fetch(`/api${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) =>
       handle<T>(r),
     ),
-  url: (path: string, params?: Params) => `/api${path}${qs(params)}`,
+  download: async (path: string, params?: Params) => { window.location.href = `/api${path}${qs(params)}`; },
 };
+
+function toApiError(e: unknown): never {
+  if (e instanceof Error && "status" in e) throw new ApiError((e as { status: number }).status, e.message);
+  throw e;
+}

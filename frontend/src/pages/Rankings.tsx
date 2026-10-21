@@ -109,9 +109,7 @@ export default function RankingsPage() {
     <div className="space-y-4">
       <PageTitle kicker={`${season} · Week ${week}`} title="Player rankings">
         {d?.run_id && <ModelBadge version={d.model_version} calibrated={calibrated} />}
-        <a href={api.url("/export/rankings.csv", { season, week })} download>
-          <Button variant="outline" size="sm"><Download className="h-3.5 w-3.5" /> Export CSV</Button>
-        </a>
+        <Button variant="outline" size="sm" onClick={() => api.download("/export/rankings.csv", { season, week })}><Download className="h-3.5 w-3.5" /> Export CSV</Button>
       </PageTitle>
 
       <Card className="p-3 sm:p-4">

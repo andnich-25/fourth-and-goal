@@ -181,14 +181,18 @@ def top3(c: sqlite3.Connection, run_id: str, exclude: set[str] | None = None) ->
     pool = pool[floor]
     col = "p_model" if calibrated else "score"
     sel = backtest.select_top(pool, col, 3, one_per_game=True)
-    legs = []
-    for _, r in sel.iterrows():
-        legs.append({"player_id": r.player_id, "player_name": r.player_name, "team": r.team, "opponent": r.opponent,
-                     "position": r.position, "game_id": r.game_id, "rank": int(r["rank"]), "score": float(r.score),
-                     "p_model": float(r.p_model) if calibrated else None, "confidence": r.confidence,
-                     "flags": json.loads(r["flags"]), "reasons": r["reasons"]})
-    return {"legs": legs, "considered": int(len(df)), "passed_rules": int(mask.sum()), "passed_floor": int(len(pool)),
-            "rules": rules(calibrated), "calibrated": calibrated}
+
+    def leg(r):
+        return {"player_id": r.player_id, "player_name": r.player_name, "team": r.team, "opponent": r.opponent,
+                "position": r.position, "game_id": r.game_id, "rank": int(r["rank"]), "score": float(r.score),
+                "p_model": float(r.p_model) if calibrated else None, "confidence": r.confidence,
+                "flags": json.loads(r["flags"]), "reasons": r["reasons"]}
+
+    legs = [leg(r) for _, r in sel.iterrows()]
+    # Ordered rule-passing pool, so a client can exclude a leg and take the next one without a server.
+    alternates = [leg(r) for _, r in pool.sort_values(col, ascending=False).head(20).iterrows()]
+    return {"legs": legs, "alternates": alternates, "considered": int(len(df)), "passed_rules": int(mask.sum()),
+            "passed_floor": int(len(pool)), "rules": rules(calibrated), "calibrated": calibrated}
 
 
 def rules(calibrated: bool) -> list[str]:
