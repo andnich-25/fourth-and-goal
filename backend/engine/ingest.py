@@ -16,6 +16,8 @@ Ported from the handoff `nfl_full_pbp_engine.py` with these corrections:
 from __future__ import annotations
 
 import sqlite3
+import ssl
+import time
 import urllib.request
 from collections import defaultdict
 from pathlib import Path
@@ -30,17 +32,31 @@ Log = Callable[[str], None]
 
 
 # --------------------------------------------------------------------------- download
-def download(kind: str, season: int, data_dir: Path, log: Log = print, force: bool = False) -> Path:
+def _ssl_context():
+    """Use certifi's CA bundle when present (python.org macOS builds ship without system certs)."""
+    try:
+        import certifi  # noqa: PLC0415
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return None
+
+
+def download(kind: str, season: int, data_dir: Path, log: Log = print, force: bool = False,
+             max_age_hours: float | None = None) -> Path:
+    """Fetch one release file. A cached file is reused unless forced or older than max_age_hours
+    (used for the in-progress season so weekly updates arrive without re-downloading history)."""
     data_dir.mkdir(parents=True, exist_ok=True)
     path = data_dir / sources.local_name(kind, season)
     url = sources.url_for(kind, season)
-    if path.exists() and path.stat().st_size > 10_000 and not force:
+    fresh = path.exists() and (max_age_hours is None or (time.time() - path.stat().st_mtime) < max_age_hours * 3600)
+    if path.exists() and path.stat().st_size > 10_000 and not force and fresh:
         log(f"Using cached {path.name} ({path.stat().st_size:,} bytes)")
         return path
     tmp = path.with_suffix(".download")
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=120) as resp, open(tmp, "wb") as out:
+        with urllib.request.urlopen(req, timeout=180, context=_ssl_context()) as resp, open(tmp, "wb") as out:
             while True:
                 chunk = resp.read(1024 * 1024)
                 if not chunk:

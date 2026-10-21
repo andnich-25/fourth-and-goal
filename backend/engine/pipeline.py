@@ -22,7 +22,9 @@ def run_sync(c, season=2026, download=False, force=False, log=print) -> list[dic
         path = paths.raw_dir() / sources.local_name(kind, yr)
         if download:
             try:
-                path = ingest.download(kind, yr, paths.raw_dir(), log, force=force)
+                # Current-season files and the schedule change weekly; refresh them when older than 6 hours.
+                live = kind == "schedules" or yr == season
+                path = ingest.download(kind, yr, paths.raw_dir(), log, force=force, max_age_hours=6 if live else None)
             except RuntimeError as ex:
                 log(f"DOWNLOAD ERROR: {ex}")
         res = ingest.import_file(c, kind, yr, path, force=force, log=log)
