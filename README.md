@@ -7,7 +7,15 @@ This is football research, not betting advice. No pick is guaranteed.
 - **Backend:** Python 3.11+, FastAPI, SQLite, pandas, scikit-learn. The importer is a separate CLI worker (`python -m engine.cli`) that the API runs as a background subprocess.
 - **Frontend:** React 18 + TypeScript + Vite, Tailwind with shadcn-style components, TanStack Table and Query, Recharts, lucide icons. Dark and light themes.
 
-## Quick start
+## Open it without a terminal
+
+1. Install Python 3.10+ once from https://www.python.org/downloads/ (free). Node is not needed: the built interface is included.
+2. Unzip the folder and double-click **Start Fourth & Goal.command** (Mac) or **Start Fourth & Goal (Windows).bat**.
+   On a Mac, the first time macOS may say it is from an unidentified developer: right-click the file, choose **Open**, then **Open** again.
+3. The first launch sets up a private environment and downloads the nflverse data (a few minutes). Your browser then opens http://127.0.0.1:8765.
+   Later launches refresh this season's files and open in under a minute. Keep the small window open while you use the app; close it to stop.
+
+## Quick start (developers)
 
 ```bash
 # 1. Backend
