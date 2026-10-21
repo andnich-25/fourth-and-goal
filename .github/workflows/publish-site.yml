@@ -1,6 +1,7 @@
 # Rebuilds the free hosted website from fresh nflverse data and publishes it to GitHub Pages.
 # Runs Tuesday morning (after Monday night), Thursday morning (injury reports, before TNF),
-# Saturday morning and Sunday morning (final injury designations), plus on demand from the Actions tab.
+# Saturday morning and Sunday morning (final injury designations), on every push to main,
+# and on demand from the Actions tab.
 name: Refresh data and publish site
 
 on:
@@ -10,6 +11,8 @@ on:
     - cron: "0 15 * * 6"   # Sat 15:00 UTC
     - cron: "0 14 * * 0"   # Sun 14:00 UTC
   workflow_dispatch:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
