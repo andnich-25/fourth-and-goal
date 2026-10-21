@@ -38,18 +38,19 @@ QUANTS = np.arange(1, 100) / 100.0  # stored predictive quantiles (1%..99%)
 STATS = ["attempts", "completions", "pass_yards", "pass_tds", "interceptions", "carries", "rush_yards", "targets",
          "receptions", "rec_yards", "rush_rec_yards"]
 
-# market -> definition. kind "count" uses a negative binomial; "yards" uses an empirical scaled-residual distribution.
+# market -> definition. kind "count" uses a negative binomial (small, overdispersed counts); "empirical" uses the
+# scaled residuals of held-out games (yards, and pass attempts/completions, which vary less than a Poisson count).
 MARKETS = {
-    "pass_yards": {"label": "Passing yards", "stat": "pass_yards", "kind": "yards", "positions": ("QB",), "volume": "attempts"},
-    "pass_attempts": {"label": "Pass attempts", "stat": "attempts", "kind": "count", "positions": ("QB",), "volume": "attempts"},
-    "completions": {"label": "Completions", "stat": "completions", "kind": "count", "positions": ("QB",), "volume": "attempts"},
+    "pass_yards": {"label": "Passing yards", "stat": "pass_yards", "kind": "empirical", "positions": ("QB",), "volume": "attempts"},
+    "pass_attempts": {"label": "Pass attempts", "stat": "attempts", "kind": "empirical", "positions": ("QB",), "volume": "attempts"},
+    "completions": {"label": "Completions", "stat": "completions", "kind": "empirical", "positions": ("QB",), "volume": "attempts"},
     "pass_tds": {"label": "Passing TDs", "stat": "pass_tds", "kind": "count", "positions": ("QB",), "volume": "attempts"},
     "interceptions": {"label": "Interceptions thrown", "stat": "interceptions", "kind": "count", "positions": ("QB",), "volume": "attempts"},
-    "rush_yards": {"label": "Rushing yards", "stat": "rush_yards", "kind": "yards", "positions": ("QB", "RB"), "volume": "carries"},
+    "rush_yards": {"label": "Rushing yards", "stat": "rush_yards", "kind": "empirical", "positions": ("QB", "RB"), "volume": "carries"},
     "carries": {"label": "Rush attempts", "stat": "carries", "kind": "count", "positions": ("QB", "RB"), "volume": "carries"},
-    "rec_yards": {"label": "Receiving yards", "stat": "rec_yards", "kind": "yards", "positions": ("RB", "WR", "TE"), "volume": "targets"},
+    "rec_yards": {"label": "Receiving yards", "stat": "rec_yards", "kind": "empirical", "positions": ("RB", "WR", "TE"), "volume": "targets"},
     "receptions": {"label": "Receptions", "stat": "receptions", "kind": "count", "positions": ("RB", "WR", "TE"), "volume": "targets"},
-    "rush_rec_yards": {"label": "Rush + receiving yards", "stat": "rush_rec_yards", "kind": "yards", "positions": ("RB", "WR", "TE"),
+    "rush_rec_yards": {"label": "Rush + receiving yards", "stat": "rush_rec_yards", "kind": "empirical", "positions": ("RB", "WR", "TE"),
                        "volume": "touches"},
 }
 # Who gets a projection: enough recent volume to be priced by a sportsbook.
@@ -311,8 +312,16 @@ class Distribution:
     def fit(self, mu: np.ndarray, y: np.ndarray):
         mu = np.clip(mu, 0.05, None)
         if self.kind == "count":
-            # NB2 dispersion by moments: Var = mu + alpha * mu^2.
-            self.alpha = float(max(1e-4, np.mean((y - mu) ** 2 - mu) / np.mean(mu ** 2)))
+            # NB2 dispersion (Var = mu + alpha * mu^2) by maximum likelihood on held-out rows.
+            from scipy.optimize import minimize_scalar
+
+            yy = np.clip(np.round(y), 0, None)
+
+            def nll(log_a):
+                n = 1.0 / np.exp(log_a)
+                return -sps.nbinom.logpmf(yy, n, n / (n + mu)).sum()
+
+            self.alpha = float(np.exp(minimize_scalar(nll, bounds=(np.log(1e-4), np.log(5.0)), method="bounded").x))
         else:
             r = y / mu
             self.edges = np.quantile(mu, [1 / 3, 2 / 3])

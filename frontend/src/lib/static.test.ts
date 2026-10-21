@@ -15,3 +15,21 @@ describe("static site helpers", () => {
     expect(easternToUtc(null, "13:00")).toBeNull();
   });
 });
+
+import { pOver } from "./props";
+
+describe("prop over chance", () => {
+  it("reads a negative binomial CDF at a half line", () => {
+    const d = { type: "nbinom" as const, n: 5, p: 0.5, cdf: [0.1, 0.3, 0.6, 0.85, 1], platt: [1, 0] as [number, number] };
+    expect(pOver(d, 1.5)).toBeCloseTo(0.7, 6);
+    expect(pOver(d, 9.5)).toBeCloseTo(0.005, 6);
+  });
+  it("interpolates the quantile CDF and applies recalibration", () => {
+    const q = Array.from({ length: 99 }, (_, i) => i + 1); // quantile k% = k
+    const d = { type: "quantiles" as const, q, platt: [1, 0] as [number, number] };
+    expect(pOver(d, 50.5)).toBeCloseTo(0.495, 6);
+    const shrunk = pOver({ ...d, platt: [0.5, 0] }, 80.5);
+    expect(shrunk).toBeGreaterThan(0.195);
+    expect(shrunk).toBeLessThan(0.5);
+  });
+});

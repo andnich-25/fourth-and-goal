@@ -16,7 +16,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-KEY_PARAMS = ("season", "week", "window", "model")
+KEY_PARAMS = ("season", "week", "window", "model", "market")
 
 
 def key(path: str, params: dict | None = None) -> str:
@@ -51,9 +51,14 @@ def main(argv=None):
         n += 1
         return r.json()
 
-    for p in ("/health", "/data/status", "/backtest/summary", "/backtest/weeks", "/backtest/calibration", "/feature-glossary"):
+    for p in ("/health", "/data/status", "/backtest/tuning", "/backtest/summary", "/backtest/weeks", "/backtest/calibration", "/feature-glossary"):
         save(p)
     wk = save("/weeks")
+    pm = save("/props/markets")
+    for m in (pm or {}).get("markets", []):
+        save("/props/backtest", {"market": m["market"]})
+        save("/props", {"season": wk["current_season"], "week": wk["current_week"], "market": m["market"]})
+    save("/scoring-trends", {"season": wk["current_season"]})
     bt = client.get("/api/backtest/summary").json()
     for m in list(bt.get("overall", {})) + ["baseline-opportunity"]:
         save("/backtest/picks", {"model": m})

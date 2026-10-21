@@ -14,6 +14,8 @@ import Player from "./pages/Player";
 import Backtest from "./pages/Backtest";
 import DataSync from "./pages/DataSync";
 import SettingsPage from "./pages/Settings";
+import Props from "./pages/Props";
+import Trends from "./pages/Trends";
 import { EmptyState } from "./components/ui";
 import { STATIC } from "./lib/api";
 
@@ -34,6 +36,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Route index element={<Overview />} />
               <Route path="rankings" element={<Rankings />} />
               <Route path="parlay" element={<Parlay />} />
+              <Route path="props" element={<Props />} />
+              <Route path="trends" element={<Trends />} />
               <Route path="defenses" element={<Defenses />} />
               <Route path="defenses/:team" element={<DefenseDetail />} />
               <Route path="players/:id" element={<Player />} />

@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { chicago, cn, num, pct } from "@/lib/format";
 import type { CalBin, Gate, ProbMetrics, TopN, TopPolicy } from "@/lib/types";
 import { PageTitle } from "@/components/Layout";
+import { TuningCard } from "@/components/TuningCard";
 import { Badge, Card, CardBody, CardHeader, ErrorState, LoadingBlock, Segmented, Select, Stat, TableWrap, Td, Th } from "@/components/ui";
 import { NoDataState } from "@/components/shared";
 
@@ -180,6 +181,8 @@ export default function BacktestPage() {
             </tbody></table>
         </TableWrap>
       </Card>
+
+      <TuningCard />
 
       <Card>
         <CardHeader title="Method and limits" />

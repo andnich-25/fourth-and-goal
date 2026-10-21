@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import aggregates, backtest, db, features, ingest, paths, predict, sources, status
+from . import aggregates, backtest, db, features, ingest, paths, predict, props, sources, status
 from .util import utcnow
 
 
@@ -89,7 +89,21 @@ def run_predict(c, season=2026, weeks=None, log=print) -> list[dict]:
     return out
 
 
-def run_all(season=2026, download=False, force=False, steps=("sync", "build", "backtest", "predict"), log=print) -> dict:
+def run_props(c, season=2026, log=print) -> dict:
+    """Prop projections: walk-forward over the same test weeks as the TD model, then project the upcoming week."""
+    feats = load_features()
+    wk = status.current_week(c, season)
+    frame = props.build_frame(c, props.upcoming_rows(feats, season, wk) if wk else None)
+    test = [(season - 1, w) for w in range(1, 19)] + [(season, w) for w in range(1, wk or 19)]
+    have = set(zip(frame[frame.labelled == 1].season, frame[frame.labelled == 1].week))
+    rep = props.walk_forward(c, frame, [t for t in test if t in have], log=log)
+    out = {"walk_forward": rep["run_id"], "promoted": {m: r["gate"]["promoted"] for m, r in rep["markets"].items()}}
+    if wk:
+        out["projection"] = props.project_week(c, frame, season, wk, log)
+    return out
+
+
+def run_all(season=2026, download=False, force=False, steps=("sync", "build", "backtest", "predict", "props"), log=print) -> dict:
     c = db.connect(paths.db_path())
     try:
         res = {}
@@ -102,6 +116,8 @@ def run_all(season=2026, download=False, force=False, steps=("sync", "build", "b
             res["backtest"] = {"run_id": rep["run_id"], "promoted": rep["gate"]["promoted"]}
         if "predict" in steps:
             res["predict"] = run_predict(c, season, log=log)
+        if "props" in steps:
+            res["props"] = run_props(c, season, log)
         st = status.write_build_status(c, season)
         log(f"build_status.json written: ready={st['ready']} promoted={st['model']['promoted']}")
         return res

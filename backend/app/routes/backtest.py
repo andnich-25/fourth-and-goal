@@ -69,3 +69,22 @@ def week_detail(season: int, week: int, model: str | None = None, limit: int = Q
                                           FROM backtest_preds WHERE run_id=? AND model=? AND season=? AND week=?
                                           ORDER BY score DESC LIMIT ?""", (wf["run_id"], model, season, week, limit))]
     return {"available": True, "model": model, "season": season, "week": week, "rows": rows}
+
+
+@router.get("/tuning")
+def tuning():
+    """Results of the last tuning study (python -m engine.tuning), if one has been run."""
+    import json
+
+    from engine import paths
+
+    f = paths.results_dir() / "tuning.json"
+    if not f.exists():
+        return {"available": False}
+    r = json.loads(f.read_text())
+    return {"available": True, "created_at": r["created_at"], "selection_weeks": r["selection_weeks"], "holdout_weeks": r["holdout_weeks"],
+            "stage_a": [{k: v for k, v in x.items() if k in ("window", "prior_season_weight", "def_shrink_games", "log_loss", "brier",
+                                                              "top3_policy_hits", "top3_policy_legs")} for x in r["stage_a"]],
+            "stage_b": [{k: v for k, v in x.items() if k in ("added", "accepted", "log_loss", "previous", "all_trials")} for x in r["stage_b"]],
+            "c_grid": [{"C": x["C"], "log_loss": x["log_loss"]} for x in r["c_grid"]], "tuned": r["tuned"],
+            "comparison": r["comparison"], "adopt": r["adopt"]}

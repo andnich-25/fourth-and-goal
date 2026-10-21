@@ -106,30 +106,44 @@ ML_FEATURES = ["log_lam", "carries_pg", "targets_pg", "rz_carries_pg", "goal10_c
                "n_games_cur", "changed_team", "is_rb", "is_wr", "is_te", "is_qb"]
 
 
-def _ml_matrix(df: pd.DataFrame, structural: StructuralModel) -> np.ndarray:
+EXTRA_DEFAULTS = {"opp_implied_total": 22.0, "spread_for": 0.0, "cur_td_rate": 0.18, "cur_xtd_pg": 0.0, "team_rz_trips_pg": 3.3,
+                  "opp_def_rz_td_rate": 0.56, "opp_def_rz_trips_pg": 3.3, "opp_def_pos_l4_mult": 1.0}
+
+
+def _ml_matrix(df: pd.DataFrame, structural: StructuralModel, features: list[str] | None = None) -> np.ndarray:
     d = _fill(df)
+    for k, v in EXTRA_DEFAULTS.items():
+        d[k] = pd.to_numeric(d.get(k), errors="coerce").fillna(v)
+    d["rz_x_def"] = (d.rz_carries_pg + d.rz_targets_pg) * np.clip(d.opp_def_pos_mult, 0.5, 2.0)
+    d["is_home"] = pd.to_numeric(d.get("is_home"), errors="coerce").fillna(0.5)
     d["log_lam"] = np.log(structural.lam(df))
     d["implied"] = pd.to_numeric(d.team_implied_total, errors="coerce").fillna(22.0)
     d["anytime_rate_shrunk"] = pd.to_numeric(d.anytime_rate_shrunk, errors="coerce").fillna(0.15)
     for p in ("RB", "WR", "TE", "QB"):
         d[f"is_{p.lower()}"] = (d.position == p).astype(float)
-    return d[ML_FEATURES].astype(float).values
+    return d[features or ML_FEATURES].astype(float).values
 
 
 class LogitModel:
     version = "fg-logit-1"
+    FEATURES = ML_FEATURES
+    C = 0.5
+
+    def __init__(self, features: list[str] | None = None, C: float | None = None):
+        self.features = list(features or self.FEATURES)
+        self.c = C if C is not None else self.C
 
     def fit(self, train, team_games=None):
         self.struct = StructuralModel().fit(train, team_games)
-        self.clf = make_pipeline(StandardScaler(), LogisticRegression(C=0.5, max_iter=2000))
-        self.clf.fit(_ml_matrix(train, self.struct), train.scored_anytime.values.astype(int))
+        self.clf = make_pipeline(StandardScaler(), LogisticRegression(C=self.c, max_iter=2000))
+        self.clf.fit(_ml_matrix(train, self.struct, self.features), train.scored_anytime.values.astype(int))
         return self
 
     def predict(self, df):
-        return np.clip(self.clf.predict_proba(_ml_matrix(df, self.struct))[:, 1], EPS, 1 - EPS)
+        return np.clip(self.clf.predict_proba(_ml_matrix(df, self.struct, self.features))[:, 1], EPS, 1 - EPS)
 
     def params(self):
-        return {"features": ML_FEATURES, "C": 0.5}
+        return {"features": self.features, "C": self.c}
 
 
 class GBMModel:

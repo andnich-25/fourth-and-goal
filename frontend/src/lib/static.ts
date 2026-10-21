@@ -5,7 +5,7 @@ import type { Leg, RankingRow, RankingsResponse, Top3Response } from "./types";
 
 export type Params = Record<string, string | number | boolean | null | undefined | (string | number)[]>;
 
-const KEY_PARAMS = ["season", "week", "window", "model"] as const;
+const KEY_PARAMS = ["season", "week", "window", "model", "market"] as const;
 const BASE = `${import.meta.env.BASE_URL}data/`;
 const LOCKS_KEY = "fg-locks-v1";
 const JOINT_NOTE = "Simplistic independence product of the individual validated estimates. It ignores correlation between legs " +
@@ -43,6 +43,7 @@ async function load<T>(path: string, params: Params = {}): Promise<T> {
 }
 
 function notPublished(path: string): string {
+  if (path === "/props") return "The website publishes prop projections for the upcoming week only.";
   if (path.startsWith("/players/")) return "The website publishes player pages for the latest week only. Switch to the latest week, or use the desktop app for older weeks.";
   return "This view is not included in the published website data.";
 }
@@ -242,7 +243,8 @@ export async function staticGet<T>(path: string, params: Params = {}): Promise<T
   if (path === "/weekly-top3") return weeklyTop3(params) as Promise<T>;
   if (path === "/locks") return locks(params) as Promise<T>;
   if (path === "/data/jobs") return [] as T;
-  const needsWeek = path === "/overview" || path === "/defenses" || path.startsWith("/defenses/") || path.startsWith("/players/");
+  if (path === "/scoring-trends") return load<T>(path, params.season ? params : { season: (await defaults({})).season });
+  const needsWeek = path === "/props" || path === "/overview" || path === "/defenses" || path.startsWith("/defenses/") || path.startsWith("/players/");
   return load<T>(path, needsWeek ? await defaults(params) : params);
 }
 

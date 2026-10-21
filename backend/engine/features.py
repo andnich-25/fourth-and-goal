@@ -45,6 +45,14 @@ FEATURE_DOC = {
     "opp_def_games": "Opponent games in the defensive sample",
     "changed_team": "Most recent game was for a different team",
     "missed_team_games": "Team games this season the player did not participate in",
+    "opp_implied_total": "Market-implied points for the opponent (game script)",
+    "spread_for": "Team implied total minus opponent implied total (positive = favored)",
+    "cur_td_rate": "TDs per game this season (at most one counted per game), shrunk toward the position rate",
+    "cur_xtd_pg": "Play-based xTD per game this season",
+    "team_rz_trips_pg": "Team red-zone trips per game this season (shrunk)",
+    "opp_def_rz_td_rate": "Opponent red-zone drives allowed that ended in a TD, this season (shrunk)",
+    "opp_def_rz_trips_pg": "Red-zone trips the opponent allows per game, this season (shrunk)",
+    "opp_def_pos_l4_mult": "Opponent position TDs allowed over its last 4 games vs league average",
 }
 
 
@@ -147,6 +155,7 @@ def compute_features(c: sqlite3.Connection, targets: pd.DataFrame, injuries: boo
     out = out.join(_team_features(team, out), how="left")
     out = out.join(_defense_features(c, out), how="left")
     out["team_implied_total"] = out.pop("implied_total")
+    out = out.join(_extra_features(c, out), how="left")
     out["missed_team_games"] = (out.team_games_cur - out.n_games_cur).clip(lower=0)
     if injuries:
         inj = _df(c, "SELECT season, week, team, player_id, report_status, practice_status, injury FROM injuries")
@@ -156,6 +165,68 @@ def compute_features(c: sqlite3.Connection, targets: pd.DataFrame, injuries: boo
         out["injury_report_published"] = out.inj_rows.notna().astype(int)
         out = out.drop(columns=["inj_rows"])
     return out.sort_index()
+
+
+def _extra_features(c, out: pd.DataFrame) -> pd.DataFrame:
+    """Game script, this-season pace, red-zone environment and recent-form defense; all from games before the week."""
+    res = pd.DataFrame(index=out.index)
+    g = _df(c, "SELECT season, week, home_team, away_team, spread_line, total_line FROM games")
+    home = g.assign(team=g.home_team, opp_imp=(g.total_line - g.spread_line) / 2)
+    away = g.assign(team=g.away_team, opp_imp=(g.total_line + g.spread_line) / 2)
+    sched = pd.concat([home, away])[["season", "week", "team", "opp_imp"]].drop_duplicates(["season", "week", "team"])
+    m = out[["season", "week", "team"]].reset_index().merge(sched, on=["season", "week", "team"], how="left").set_index("index")
+    res["opp_implied_total"] = m.opp_imp
+    res["spread_for"] = out.team_implied_total - m.opp_imp
+    pos_rate = out.position.map({"RB": 0.30, "WR": 0.20, "TE": 0.15, "QB": 0.08}).fillna(0.15)
+    n = out.n_games_cur.fillna(0)
+    res["cur_td_rate"] = (out.cur_tds.fillna(0).clip(upper=n) + RATE_SHRINK_GAMES * pos_rate) / (n + RATE_SHRINK_GAMES)
+    res["cur_xtd_pg"] = np.where(n > 0, out.cur_xtd.fillna(0) / n.replace(0, 1), np.nan)
+
+    tg = _df(c, "SELECT season, week, team, opponent, rz_trips, rz_td_drives FROM team_game")
+    keys = out[["season", "week", "team", "opponent"]].drop_duplicates()
+    lg = tg.groupby("season")[["rz_trips", "rz_td_drives"]].sum()
+    lg_games = tg.groupby("season").size()
+    off, deff = {}, {}
+    by_off = {k: v for k, v in tg.groupby(["season", "team"])}
+    by_def = {k: v for k, v in tg.groupby(["season", "opponent"])}
+    for s_, wk, tm, opp in keys.itertuples(index=False):
+        ref = s_ - 1 if (s_ - 1) in lg.index else s_
+        if ref not in lg.index:
+            continue
+        trips_pg = lg.loc[ref, "rz_trips"] / lg_games[ref]
+        td_rate = lg.loc[ref, "rz_td_drives"] / max(lg.loc[ref, "rz_trips"], 1)
+        o = by_off.get((s_, tm))
+        o = o[o.week < wk] if o is not None else tg.iloc[0:0]
+        off[(s_, wk, tm)] = (o.rz_trips.sum() + TEAM_SHRINK_GAMES * trips_pg) / (len(o) + TEAM_SHRINK_GAMES)
+        d = by_def.get((s_, opp))
+        d = d[d.week < wk] if d is not None else tg.iloc[0:0]
+        deff[(s_, wk, opp)] = ((d.rz_td_drives.sum() + 10 * td_rate) / (d.rz_trips.sum() + 10),
+                               (d.rz_trips.sum() + DEF_SHRINK_GAMES * trips_pg) / (len(d) + DEF_SHRINK_GAMES))
+    res["team_rz_trips_pg"] = [off.get((a, b, t_)) for a, b, t_ in zip(out.season, out.week, out.team)]
+    dd = [deff.get((a, b, o_), (None, None)) for a, b, o_ in zip(out.season, out.week, out.opponent)]
+    res["opp_def_rz_td_rate"] = [x[0] for x in dd]
+    res["opp_def_rz_trips_pg"] = [x[1] for x in dd]
+
+    # Recent-form defense: last 4 games, position TDs allowed relative to the league per-game rate.
+    l4 = {}
+    for (s_, wk), rows in out.groupby(["season", "week"]):
+        t = defense_table(c, int(s_), int(wk), window=4)
+        full = defense_table(c, int(s_), int(wk))
+        if t.empty or full.empty:
+            continue
+        lg_pos = full.groupby("position").touchdowns.sum() / full.groupby("defense").games.first().sum()
+        t = t.set_index(["defense", "position"])
+        for idx, opp, pos in rows[["opponent", "position"]].itertuples():
+            base = lg_pos.get(pos)
+            if not base:
+                continue
+            if (opp, pos) in t.index:
+                r = t.loc[(opp, pos)]
+                l4[idx] = ((float(r.touchdowns) + 2 * base) / (float(r.games) + 2)) / base
+            else:
+                l4[idx] = 1.0
+    res["opp_def_pos_l4_mult"] = pd.Series(l4)
+    return res
 
 
 def _player_features(window, r, pos_rates) -> dict:

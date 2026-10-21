@@ -59,6 +59,8 @@ cd frontend && npm run typecheck && npm test && npm run build
 |---|---|
 | `/` | Weekly overview: Top Three watchlist, model/data status, matchup strip with market-implied totals, scoring-area volume leaders, defense vulnerabilities, walk-forward performance |
 | `/rankings` | All eligible players. Server-side sort, filter, paging; column toggles; pin up to 3; CSV export; expandable "why ranked here"; card layout on mobile |
+| `/props` | Player props (passing, rushing, receiving): projection, 10–90% range, and for validated markets the chance of going over a line you type |
+| `/trends` | Who is scoring this season: which pregame metrics separated scorers, where TDs start, leaders, generous defenses |
 | `/parlay` | Top 3 builder: evidence rules, exclude and replace, pinned legs, manual American/decimal odds with implied probability, independence product clearly marked simplistic, immutable locks with later grading, CSV export |
 | `/defenses`, `/defenses/:team` | All 32 defenses by position (season / last 6 / last 3), xTD allowed, red-zone drive TD rate, pace faced, two-team compare, every TD allowed |
 | `/players/:id` | Identity and game, weekly inside-5/10 carries and red-zone targets chart with xTD, field-position split, game log, scoring-chance ledger (misses labelled as missed opportunities, end-zone target proxy labelled as a proxy), opponent history |
@@ -90,6 +92,14 @@ Test weeks: 2025 W1–W18 and 2026 W1–W6 (24 weeks, 8,940 player-games, TD bas
 | Baseline: position rate | 0.1354 | 0.4410 | 0.566 | 0.005 |
 
 Top-3 by the promoted model: 47 of 72 picks scored (65%, Wilson 95% CI 54–75%). With the Top 3 evidence rules (one leg per game, no Questionable/Doubtful), all three legs scored in 8 of 24 weeks (33%). The calibration curve is thin above 60%: only 111 of 8,940 test predictions were that high, and they ran a few points hot, so the UI warns on any leg at 70% or more.
+
+## Player props
+
+`engine/props.py` projects passing yards, attempts, completions, passing TDs, interceptions, rushing yards, rush attempts, receiving yards, receptions and rush + receiving yards with a full predictive distribution (negative binomial for small counts, held-out scaled residuals otherwise). Each market runs the same walk-forward as the TD model and must beat the player-average and position-average baselines on CRPS (week-bootstrap CI), on over/under Brier at a reference line, and be calibrated, before the site shows over/under chances. No historical sportsbook prop lines exist in nflverse, so the reference line is the player's recent median (floor + 0.5).
+
+## Tuning study
+
+`python -m engine.tuning` tests feature settings and extra metrics on 2025 and checks the winner once on the current season's completed weeks; results appear on the Backtest page. The October 2026 run kept the existing settings because the best 2025 setting was worse on 2026.
 
 ## Data honesty rules enforced in code
 
