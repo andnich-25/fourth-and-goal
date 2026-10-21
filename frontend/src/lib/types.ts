@@ -46,8 +46,6 @@ export type RankingRow = {
   flags: string[];
   reasons: Reason[];
   features: Features;
-  venom_score: number | null;
-  venom_prob: number | null;
   outcome: number | null;
   participated: number | null;
 };

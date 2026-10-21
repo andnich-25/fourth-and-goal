@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { kickoff, num, pct, POSITIONS } from "@/lib/format";
 import { useLinkSuffix, useSeasonWeek } from "@/lib/state";
 import { PageTitle } from "@/components/Layout";
-import { Badge, Card, CardBody, CardHeader, ErrorState, LoadingBlock, Notice, PosBadge, Segmented, Stat, TableWrap, Td, TeamBadge, Th } from "@/components/ui";
+import { Card, CardBody, CardHeader, ErrorState, LoadingBlock, Notice, PosBadge, Segmented, Stat, TableWrap, Td, TeamBadge, Th } from "@/components/ui";
 import type { DefenseRow } from "./Defenses";
 
 type Detail = {
@@ -15,7 +15,6 @@ type Detail = {
   weekly: { week: number; offense: string; position: string; touchdowns: number; xtd: number; opportunities: number; rz_carries: number; rz_targets: number; goal5_carries: number; goal5_targets: number; ez_target_proxy: number }[];
   touchdowns_allowed: { week: number; offense: string; player_id: string; player_name: string; position: string; event_type: string; yards_to_goal: number; air_yards: number | null; description: string }[];
   upcoming: { opponent: string; home: boolean; gameday: string; gametime: string; opponent_implied_total: number | null } | null;
-  venom_notes: { stat: string; value: number; sample_games: number; source: string }[];
 };
 const COLORS: Record<string, string> = { QB: "rgb(var(--muted))", RB: "rgb(var(--accent))", WR: "rgb(var(--info))", TE: "rgb(var(--warn))" };
 
@@ -97,12 +96,6 @@ export default function DefenseDetail() {
             </TableWrap>
           </Card>
 
-          {d.venom_notes.length > 0 && (
-            <Card>
-              <CardHeader title={<span className="flex items-center gap-2">Venom screenshot notes <Badge tone="neutral">Week {week} only</Badge></span>} subtitle="User-supplied observations; compare with the computed numbers above" />
-              <CardBody><ul className="space-y-1 text-sm">{d.venom_notes.map((n) => <li key={n.stat}><span className="font-medium">{n.value}</span> {n.stat} <span className="text-muted">({n.sample_games} games · {n.source})</span></li>)}</ul></CardBody>
-            </Card>
-          )}
           <Notice tone="warn" title="Coverage tracking not connected">Man/zone and Cover 1–4 rates require a charting source that is not imported, so none are shown.</Notice>
         </>
       )}

@@ -248,5 +248,5 @@ export async function staticGet<T>(path: string, params: Params = {}): Promise<T
 
 export async function staticPost<T>(path: string, body: unknown): Promise<T> {
   if (path === "/weekly-top3/lock") return lock(body as LockBody) as Promise<T>;
-  throw new StaticError(405, "The website is read-only. Data refreshes automatically on a schedule, and Venom imports need the desktop app.");
+  throw new StaticError(405, "The website is read-only. Data refreshes automatically on a schedule.");
 }

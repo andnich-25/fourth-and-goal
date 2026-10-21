@@ -56,7 +56,7 @@ export function CardBody({ className, ...p }: React.HTMLAttributes<HTMLDivElemen
 }
 
 /* ---------------------------------------------------------------- Badge */
-type Tone = "neutral" | "accent" | "warn" | "danger" | "info" | "ok" | "pilot";
+type Tone = "neutral" | "accent" | "warn" | "danger" | "info" | "ok";
 export function Badge({ tone = "neutral", className, children, title }: { tone?: Tone; className?: string; children: React.ReactNode; title?: string }) {
   return (
     <span
@@ -69,7 +69,6 @@ export function Badge({ tone = "neutral", className, children, title }: { tone?:
         tone === "danger" && "border-danger/30 bg-danger/10 text-danger",
         tone === "info" && "border-info/30 bg-info/10 text-info",
         tone === "ok" && "border-ok/30 bg-ok/10 text-ok",
-        tone === "pilot" && "border-warn/50 bg-warn/15 font-bold uppercase tracking-wider text-warn",
         className,
       )}
     >

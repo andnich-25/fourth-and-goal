@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { chicago, cn, num, pct } from "@/lib/format";
 import type { CalBin, Gate, ProbMetrics, TopN, TopPolicy } from "@/lib/types";
 import { PageTitle } from "@/components/Layout";
-import { Badge, Card, CardBody, CardHeader, ErrorState, LoadingBlock, Notice, Segmented, Select, Stat, TableWrap, Td, Th } from "@/components/ui";
+import { Badge, Card, CardBody, CardHeader, ErrorState, LoadingBlock, Segmented, Select, Stat, TableWrap, Td, Th } from "@/components/ui";
 import { NoDataState } from "@/components/shared";
 
 type Summary = {
@@ -16,7 +16,6 @@ type Summary = {
 };
 type WeekRow = { season: number; week: number; n: number; scorers: number; [k: string]: unknown };
 type Pick = { model: string; season: number; week: number; player_id: string; player_name: string; team: string; position: string; opponent: string; score: number; participated: number; scored: number | null };
-type Pilot = { label: string; warning: string; tables: { pilot_policy_metrics: Record<string, string | number>[] } };
 
 const LABEL: Record<string, string> = {
   "fg-structural-1": "Structural (team TD × share × matchup)", "fg-logit-1": "Logistic regression", "fg-gbm-1": "Gradient boosting",
@@ -27,7 +26,6 @@ export default function BacktestPage() {
   const s = useQuery({ queryKey: ["bt-summary"], queryFn: () => api.get<Summary>("/backtest/summary") });
   const w = useQuery({ queryKey: ["bt-weeks"], queryFn: () => api.get<{ weeks: WeekRow[] }>("/backtest/weeks") });
   const cal = useQuery({ queryKey: ["bt-cal"], queryFn: () => api.get<{ models: Record<string, CalBin[]> }>("/backtest/calibration") });
-  const pilot = useQuery({ queryKey: ["pilot"], queryFn: () => api.get<Pilot>("/pilot") });
   const d = s.data;
   const promoted = d?.gate?.promoted ?? null;
   const [model, setModel] = React.useState<string>("");
@@ -188,18 +186,6 @@ export default function BacktestPage() {
         <CardBody><ul className="list-disc space-y-1.5 pl-5 text-sm text-muted">{d.method.map((x) => <li key={x}>{x}</li>)}</ul></CardBody>
       </Card>
 
-      {pilot.data && (
-        <Card className="border-warn/40">
-          <CardHeader title={<span className="flex items-center gap-2"><Badge tone="pilot">PILOT</Badge> Biased 26-player pilot (handoff)</span>} subtitle={pilot.data.warning} />
-          <CardBody className="space-y-3">
-            <Notice tone="warn">These figures come from a hand-picked elite cohort and were explored after the fact. They are segregated here and are not part of any KPI above.</Notice>
-            <TableWrap>
-              <table className="w-full"><thead><tr><Th>Policy</Th><Th className="text-right">Slots/wk</Th><Th className="text-right">Hits/picks</Th><Th className="text-right">Rate</Th><Th className="text-right">Wilson 95%</Th></tr></thead>
-                <tbody>{pilot.data.tables.pilot_policy_metrics.map((r, i) => <tr key={i}><Td className="whitespace-normal">{String(r.policy)}</Td><Td className="text-right">{r.slots_per_week}</Td><Td className="text-right">{r.hits}/{r.picks}</Td><Td className="text-right">{pct(r.hit_rate)}</Td><Td className="text-right text-muted">{pct(r.wilson95_low)}–{pct(r.wilson95_high)}</Td></tr>)}</tbody></table>
-            </TableWrap>
-          </CardBody>
-        </Card>
-      )}
     </div>
   );
 }

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import aggregates, backtest, db, features, ingest, paths, predict, seed, sources, status
+from . import aggregates, backtest, db, features, ingest, paths, predict, sources, status
 from .util import utcnow
 
 
@@ -92,8 +92,6 @@ def run_predict(c, season=2026, weeks=None, log=print) -> list[dict]:
 def run_all(season=2026, download=False, force=False, steps=("sync", "build", "backtest", "predict"), log=print) -> dict:
     c = db.connect(paths.db_path())
     try:
-        seed.seed_pilot(c)
-        seed.seed_venom(c)
         res = {}
         if "sync" in steps:
             res["sync"] = run_sync(c, season, download, force, log)

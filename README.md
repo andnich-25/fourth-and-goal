@@ -21,7 +21,7 @@ The same interface can run as a free, read-only website that rebuilds itself fro
 
 - `.github/workflows/publish-site.yml` runs Tuesday, Thursday, Saturday and Sunday mornings (and on demand from the **Actions** tab). It downloads the data, runs the import, walk-forward validation and predictions, runs the tests, pre-renders every page's data (`python -m engine.export_static`), builds the interface with `VITE_STATIC=1` and publishes it to GitHub Pages. If any step fails, nothing is published and the previous site stays up.
 - One-time setup on a **public** GitHub repository: Settings → Pages → Source: **GitHub Actions**, then run the workflow once from the Actions tab. The site appears at `https://<user>.github.io/<repo>/`. GitHub Pages on a private repository needs a paid plan; for a private repo, deploy the same `frontend/dist` folder to Cloudflare Pages instead.
-- On the website, filtering, sorting, paging and Top 3 exclude-and-replace run in the browser on the published numbers. Locked selections are saved in that browser only (append-only) and export to CSV. Data import and Venom import are desktop-only. Player pages are published for the latest week.
+- On the website, filtering, sorting, paging and Top 3 exclude-and-replace run in the browser on the published numbers. Locked selections are saved in that browser only (append-only) and export to CSV. Data import is desktop-only. Player pages are published for the latest week.
 - Local preview: `cd backend && python -m engine.export_static && cd ../frontend && VITE_STATIC=1 npm run build && cp -r ../site-data dist/data && npx vite preview`.
 
 ## Quick start (developers)
@@ -62,9 +62,9 @@ cd frontend && npm run typecheck && npm test && npm run build
 | `/parlay` | Top 3 builder: evidence rules, exclude and replace, pinned legs, manual American/decimal odds with implied probability, independence product clearly marked simplistic, immutable locks with later grading, CSV export |
 | `/defenses`, `/defenses/:team` | All 32 defenses by position (season / last 6 / last 3), xTD allowed, red-zone drive TD rate, pace faced, two-team compare, every TD allowed |
 | `/players/:id` | Identity and game, weekly inside-5/10 carries and red-zone targets chart with xTD, field-position split, game log, scoring-chance ledger (misses labelled as missed opportunities, end-zone target proxy labelled as a proxy), opponent history |
-| `/backtest` | Walk-forward metrics vs baselines, promotion gate checklist, calibration plot + table, weekly top-3 hits, per position/season, frozen weekly picks, segregated PILOT section |
+| `/backtest` | Walk-forward metrics vs baselines, promotion gate checklist, calibration plot + table, weekly top-3 hits, per position/season, frozen weekly picks |
 | `/data` | Source files with rows, SHA-256, import and file timestamps, quality gates, background import with live log, `build_status.json`, licensing and method limits |
-| `/settings` | Theme, manual Venom snapshot import (one week only) |
+| `/settings` | Theme |
 
 Season and week live in the URL (`?season=2026&week=7`) so every view is linkable, and switching weeks is cached by TanStack Query.
 
@@ -96,21 +96,15 @@ Top-3 by the promoted model: 47 of 72 picks scored (65%, Wilson 95% CI 54–75%)
 - End-zone target = `air_yards >= yardline_100`, always shown as **End-zone target proxy**.
 - An incomplete or caught-but-short target is a *missed scoring opportunity*; there is no drop field anywhere.
 - Unknown values render as "—"/"unavailable" and sort last; they are never zero-filled into ranks.
-- The 26-player pilot lives only in `pilot_*` tables and the PILOT section of the Backtest page.
-- Venom values are stored with their season/week and only joined to that week. Venom Score is shown as a ranking number, never as a probability.
 - Locks are protected by SQLite triggers that reject UPDATE and DELETE, and are refused after kickoff.
 
-## Corrections made to the handoff engine
+## Engine safeguards
 
-`legacy/handoff_backend_existing/` keeps the original files unchanged. The new engine fixes:
-
-1. The week embargo was hard-coded to season 2026.
-2. Receiver/rusher TD credit now requires `td_player_id` to match (a teammate's fumble-recovery TD after a catch is not the receiver's TD).
-3. `datetime("now")` and `kind="pbp"` used double-quoted string literals, which fail on SQLite builds without DQS.
-4. A cached file was trusted by size alone; files are now hashed and re-imported only when changed, atomically.
-5. Defense "last 6" was computed only at the import cutoff; splits are now recomputed at every historical week's cutoff.
-6. `game_id`, drives, offensive play counts, snaps, injuries and schedule lines were dropped; they are now kept for red-zone drive rates, pace, participation and implied totals.
-7. A season-to-date games count was capped by the recency window, which wrongly flagged players as missing games late in the season (found and fixed during this build).
+1. Receiver/rusher TD credit requires `td_player_id` to match (a teammate's fumble-recovery TD after a catch is not the receiver's TD).
+2. Files are hashed and re-imported only when changed, atomically.
+3. Defense splits are recomputed at every historical week's cutoff, never "as of today".
+4. `game_id`, drives, offensive play counts, snaps, injuries and schedule lines are kept for red-zone drive rates, pace, participation and implied totals.
+5. Season-to-date game counts are not capped by the recency window.
 
 ## Known gaps
 

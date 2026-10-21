@@ -37,8 +37,6 @@ class RankingRow(BaseModel):
     flags: list[str]
     reasons: list[Reason]
     features: dict[str, Any]
-    venom_score: float | None = None
-    venom_prob: float | None = None
     outcome: int | None = None
     participated: int | None = None
 
@@ -79,7 +77,3 @@ class RefreshRequest(BaseModel):
     season: int = 2026
 
 
-class VenomImport(BaseModel):
-    season: int
-    week: int
-    csv_text: str = Field(..., max_length=500_000)

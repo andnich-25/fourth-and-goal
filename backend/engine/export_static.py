@@ -51,7 +51,7 @@ def main(argv=None):
         n += 1
         return r.json()
 
-    for p in ("/health", "/data/status", "/pilot", "/venom", "/backtest/summary", "/backtest/weeks", "/backtest/calibration", "/feature-glossary"):
+    for p in ("/health", "/data/status", "/backtest/summary", "/backtest/weeks", "/backtest/calibration", "/feature-glossary"):
         save(p)
     wk = save("/weeks")
     bt = client.get("/api/backtest/summary").json()

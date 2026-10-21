@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from engine import paths, sources, status
 
 from .. import jobs
-from ..core import default_season_week, get_db, latest_walk_forward, loads
+from ..core import default_season_week, get_db, latest_walk_forward
 from ..schemas import Health, RefreshRequest
 
 router = APIRouter(prefix="/api", tags=["data"])
@@ -74,17 +74,3 @@ def weeks(season: int | None = None, c: sqlite3.Connection = Depends(get_db)):
     return {"season": season, "seasons": seasons or [season], "current_season": s, "current_week": cur,
             "weeks": [dict(r) | {"has_predictions": r["week"] in runs, "status": "completed" if r["completed"] == r["games"] else
                                  ("in_progress" if r["completed"] else "upcoming")} for r in rows]}
-
-
-@router.get("/pilot")
-def pilot(c: sqlite3.Connection = Depends(get_db)):
-    """The handoff's biased 26-player pilot. Always labelled PILOT; never used by the league pipeline."""
-    out = {"label": "PILOT", "warning": "Hand-selected 26-player cohort, 2026 Weeks 1-6. Biased and post-hoc; not a validated "
-                                        "league-wide result. Shown for reference only.", "tables": {}}
-    for t in ("pilot_policy_metrics", "pilot_week7_candidates", "pilot_week7_watchlist"):
-        try:
-            out["tables"][t] = [dict(r) for r in c.execute(f"SELECT * FROM {t}")]
-        except sqlite3.OperationalError:
-            out["tables"][t] = []
-    out["handoff_status"] = loads((paths.seed_dir() / "DATA_STATUS.json").read_text()) if (paths.seed_dir() / "DATA_STATUS.json").exists() else None
-    return out

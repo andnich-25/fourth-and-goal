@@ -175,4 +175,4 @@ def test_odds_and_wilson():
     assert abs(implied_probability("-120", None) - 120 / 220) < 1e-9
     assert abs(implied_probability("2.50", "decimal") - 0.4) < 1e-9
     lo, hi = wilson(6, 8)
-    assert 0.40 < lo < 0.41 and 0.92 < hi < 0.93  # matches the handoff's pilot table
+    assert 0.40 < lo < 0.41 and 0.92 < hi < 0.93

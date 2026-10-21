@@ -145,7 +145,9 @@ def parse_player_stats(row: dict, season: int, max_week: int | None = None, emba
             value(row, "team", "recent_team"), value(row, "opponent_team", "opponent"),
             nint(value(row, "carries", "rushing_attempts")), nint(row.get("targets")), nint(row.get("receptions")),
             nint(row.get("rushing_tds")), nint(row.get("receiving_tds")), nint(row.get("passing_tds")),
-            number(row.get("rushing_yards"), 0.0), number(row.get("receiving_yards"), 0.0), value(row, "headshot_url"))
+            number(row.get("rushing_yards"), 0.0), number(row.get("receiving_yards"), 0.0), value(row, "headshot_url"),
+            nint(row.get("completions")), nint(row.get("attempts")), number(row.get("passing_yards"), 0.0),
+            nint(value(row, "passing_interceptions", "interceptions")), number(row.get("sacks_suffered", row.get("sacks")), 0.0))
 
 
 # --------------------------------------------------------------------------- importers

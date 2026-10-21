@@ -120,8 +120,6 @@ def compute_features(c: sqlite3.Connection, targets: pd.DataFrame, injuries: boo
         by_player[r.player_id].append(r)
     tgt = targets.sort_values(["season", "week"]).reset_index()
     feats = {}
-    stat_cols = ["carries", "targets", "rz_carries", "goal10_carries", "goal5_carries", "rz_targets", "goal10_targets",
-                 "ez_target_proxy", "anytime_tds"]
     for pid, rows in tgt.groupby("player_id"):
         games = by_player.get(pid, [])
         gi = 0

@@ -70,13 +70,10 @@ def player(player_id: str, season: int | None = None, week: int | None = None, c
                                               goal5_targets FROM def_pos_game WHERE season=? AND week<? AND defense=? AND position=?
                                               ORDER BY week""", (season, week, opp, pos))]
         matchup = {"defense": opp, "position": pos, "games": rows}
-    venom = [dict(r) for r in c.execute("SELECT * FROM venom_observations WHERE player_name=? AND season=? AND week=?",
-                                        (ident["player_name"], season, week))]
     return {"player_id": player_id, "player_name": ident["player_name"], "position": pos, "team": team,
             "headshot_url": ident["headshot_url"] if "headshot_url" in ident.keys() else None,
             "roster_status": ident["status"] if "status" in ident.keys() else None, "season": season, "week": week,
             "prediction": pred, "games": games, "events": events, "field_splits": splits, "usage": usage, "matchup": matchup,
-            "venom": venom,
             "definitions": {"miss": "A rush or target that did not produce a TD. Not a drop: catchability is not in play-by-play data.",
                             "ez_proxy": "End-zone target proxy = air yards >= yards to goal at the snap. Not a charted ball location.",
                             "xtd": "Play-based xTD = historical TD rate for that play type and field position, learned only from earlier seasons."}}

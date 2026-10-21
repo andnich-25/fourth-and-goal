@@ -90,15 +90,13 @@ export default function RankingsPage() {
     h.accessor((r) => r.features.opp_def_pos_td_pg_raw, { id: "opp_def_pos_td_pg", header: () => <span title="Opponent TDs allowed to this position per game (prior games only)">Opp pos TD/g</span>,
       cell: ({ row }) => <span>{num(row.original.features.opp_def_pos_td_pg_raw, 2)}<span className="text-muted"> /{num(row.original.features.opp_def_games, 0)}g</span></span> }),
     h.accessor("confidence", { header: "Data", enableSorting: false, cell: (c) => <ConfidenceBadge c={c.getValue()} /> }),
-    h.accessor("venom_score", { header: () => <span title="User-entered Venom screenshot value for this week only. A ranking number, not a probability.">Venom</span>, enableSorting: false,
-      cell: (c) => c.getValue() != null ? <Badge tone="neutral">{num(c.getValue(), 1)}</Badge> : <span className="text-muted">—</span> }),
     h.display({ id: "outcome", header: "Result", cell: ({ row }) => <Outcome outcome={row.original.outcome} participated={row.original.participated} /> }),
     h.display({ id: "flags", header: "Flags", cell: ({ row }) => row.original.flags.length ? <Badge tone="warn" title={row.original.flags.join("\n")}>{row.original.flags.length}</Badge> : null }),
   ], [calibrated, pins, suffix, season, week]);
 
   const table = useReactTable({
     data: d?.rows ?? [], columns, getCoreRowModel: getCoreRowModel(), manualSorting: true, manualPagination: true,
-    state: { sorting, columnVisibility: { venom_score: !!fa.venom, outcome: !!fa.outcomes, p_model: calibrated, ...visibility } },
+    state: { sorting, columnVisibility: { outcome: !!fa.outcomes, p_model: calibrated, ...visibility } },
     onSortingChange: setSorting, onColumnVisibilityChange: setVisibility, enableSortingRemoval: false,
     getRowId: (r) => r.player_id + r.team,
   });

@@ -97,8 +97,7 @@ def defense_detail(team: str, season: int | None = None, week: int | None = None
                                          FROM pbp_events e LEFT JOIN player_game pg ON pg.season=e.season AND pg.week=e.week
                                          AND pg.player_id=e.player_id AND pg.team=e.offense
                                          WHERE e.season=? AND e.week<? AND e.defense=? AND e.td=1 ORDER BY e.week""", (season, week, team))]
-    venom = [dict(r) for r in c.execute("SELECT * FROM venom_defense_notes WHERE defense=? AND season=? AND week=?", (team, season, week))]
     return {"season": season, "week": week, "team": team, "full": full, "last6": _summary(c, season, week, team, 6),
             "last3": _summary(c, season, week, team, 3), "weekly": weekly, "touchdowns_allowed": tds,
-            "upcoming": _upcoming(c, season, week).get(team), "venom_notes": venom,
+            "upcoming": _upcoming(c, season, week).get(team),
             "coverage": "Coverage tracking not connected."}

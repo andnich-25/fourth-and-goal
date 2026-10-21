@@ -50,23 +50,13 @@ def _query(c, run_id, position, team, search, eligible_only, sort, order, calibr
     return " AND ".join(where), params, order_sql
 
 
-def _venom(c, season, week):
-    try:
-        return {(r["player_name"], r["team"]): dict(r) for r in
-                c.execute("SELECT * FROM venom_observations WHERE season=? AND week=?", (season, week))}
-    except sqlite3.OperationalError:
-        return {}
-
-
-def _row(r, calibrated, venom) -> RankingRow:
+def _row(r, calibrated) -> RankingRow:
     f = loads(r["features"], {})
-    v = venom.get((r["player_name"], r["team"]))
     return RankingRow(rank=r["rank"], player_id=r["player_id"], player_name=r["player_name"], team=r["team"],
                       position=r["position"], opponent=r["opponent"], game_id=r["game_id"], gameday=f.get("gameday"),
                       gametime=f.get("gametime"), is_home=f.get("is_home"), eligible=bool(r["eligible"]), exclusion=r["exclusion"],
                       score=r["score"], p_model=r["p_model"] if calibrated else None, confidence=r["confidence"],
                       flags=loads(r["flags"], []), reasons=f.pop("reasons", []) or [], features=f,
-                      venom_score=v["venom_score"] if v else None, venom_prob=v["venom_prob"] if v else None,
                       outcome=r["outcome"], participated=r["participated"])
 
 
@@ -90,14 +80,13 @@ def rankings(season: int | None = None, week: int | None = None, position: list[
     total = c.execute(f"SELECT COUNT(*) FROM predictions p WHERE {where}", params).fetchone()[0]
     rows = c.execute(f"SELECT * FROM predictions p WHERE {where} ORDER BY {order_sql} LIMIT ? OFFSET ?",
                      params + [page_size, (page - 1) * page_size]).fetchall()
-    venom = _venom(c, season, week)
     snaps = c.execute("SELECT COUNT(*) FROM snaps WHERE season=?", (season,)).fetchone()[0]
     inj = c.execute("SELECT COUNT(*) FROM injuries WHERE season=? AND week=?", (season, week)).fetchone()[0]
     return RankingsResponse(
         season=season, week=week, run_id=run["run_id"], model_version=run["model_version"], calibrated=calibrated,
         as_of=run["created_at"], data_cutoff=run["data_cutoff"], total=total, page=page, page_size=page_size,
-        rows=[_row(r, calibrated, venom) for r in rows],
-        fields_available={"p_model": calibrated, "venom": bool(venom), "snap_pct": snaps > 0, "injury_report": inj > 0,
+        rows=[_row(r, calibrated) for r in rows],
+        fields_available={"p_model": calibrated, "snap_pct": snaps > 0, "injury_report": inj > 0,
                           "market_lines": c.execute("SELECT COUNT(*) FROM games WHERE season=? AND week=? AND total_line IS NOT NULL",
                                                     (season, week)).fetchone()[0] > 0,
                           "coverage": False, "outcomes": any(r["outcome"] is not None for r in rows)})

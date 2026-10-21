@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS player_week(
   season INT, week INT, game_id TEXT, player_id TEXT, player_name TEXT, position TEXT,
   team TEXT, opponent TEXT, carries INT, targets INT, receptions INT, rush_tds INT,
   rec_tds INT, pass_tds INT, rush_yards REAL, rec_yards REAL, headshot_url TEXT,
+  completions INT, attempts INT, pass_yards REAL, interceptions INT, sacks REAL,
   PRIMARY KEY(season, week, player_id, team)
 );
 CREATE INDEX IF NOT EXISTS idx_pw_player ON player_week(player_id, season, week);
@@ -131,6 +132,22 @@ CREATE TABLE IF NOT EXISTS backtest_preds(
 );
 CREATE INDEX IF NOT EXISTS idx_btp ON backtest_preds(run_id, model, season, week);
 
+CREATE TABLE IF NOT EXISTS prop_runs(
+  run_id TEXT PRIMARY KEY, kind TEXT, created_at TEXT, report TEXT, parent_run TEXT
+);
+CREATE TABLE IF NOT EXISTS prop_backtest(
+  run_id TEXT, market TEXT, model TEXT, season INT, week INT, player_id TEXT, player_name TEXT, team TEXT,
+  position TEXT, mean REAL, median REAL, line REAL, p_over REAL, actual REAL,
+  PRIMARY KEY(run_id, market, model, season, week, player_id, team)
+);
+CREATE TABLE IF NOT EXISTS prop_projections(
+  run_id TEXT, market TEXT, season INT, week INT, player_id TEXT, player_name TEXT, team TEXT, opponent TEXT,
+  position TEXT, game_id TEXT, eligible INT, exclusion TEXT, flags TEXT, model TEXT, calibrated INT, mean REAL,
+  median REAL, q10 REAL, q90 REAL, dist TEXT, evidence TEXT, actual REAL,
+  PRIMARY KEY(run_id, market, player_id, team)
+);
+CREATE INDEX IF NOT EXISTS idx_propproj ON prop_projections(season, week, market);
+
 -- Audit / user data ----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS top3_locks(
   lock_id TEXT PRIMARY KEY, created_at TEXT, season INT, week INT, run_id TEXT,
@@ -141,17 +158,6 @@ BEGIN SELECT RAISE(ABORT, 'locked selections are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS top3_locks_no_delete BEFORE DELETE ON top3_locks
 BEGIN SELECT RAISE(ABORT, 'locked selections are immutable'); END;
 
-CREATE TABLE IF NOT EXISTS venom_observations(
-  id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT, imported_at TEXT, observed_date TEXT,
-  season INT, week INT, player_name TEXT, team TEXT, position TEXT, opponent TEXT,
-  venom_rank INT, venom_score REAL, venom_prob REAL, source_notes TEXT,
-  UNIQUE(season, week, player_name, team, observed_date)
-);
-CREATE TABLE IF NOT EXISTS venom_defense_notes(
-  id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT, imported_at TEXT, season INT, week INT,
-  defense TEXT, sample_games INT, stat TEXT, value REAL, source TEXT,
-  UNIQUE(season, week, defense, stat)
-);
 
 CREATE TABLE IF NOT EXISTS jobs(
   job_id TEXT PRIMARY KEY, kind TEXT, status TEXT, created_at TEXT, started_at TEXT,
@@ -170,4 +176,30 @@ def connect(path: str | Path) -> sqlite3.Connection:
     c.execute("PRAGMA synchronous=NORMAL")
     c.execute("PRAGMA foreign_keys=ON")
     c.executescript(SCHEMA)
+    _migrate(c)
     return c
+
+
+# Columns added after the first release, with the source kind that must be re-imported to fill them.
+ADDED_COLUMNS = {"player_week": ([("completions", "INT"), ("attempts", "INT"), ("pass_yards", "REAL"),
+                                  ("interceptions", "INT"), ("sacks", "REAL")], "stats")}
+
+
+# Tables from earlier versions that are no longer used.
+DROPPED_TABLES = ("venom_observations", "venom_defense_notes", "pilot_player_games", "pilot_walk_forward",
+                  "pilot_week7_candidates", "pilot_policy_metrics", "pilot_week7_watchlist")
+
+
+def _migrate(c: sqlite3.Connection):
+    with c:
+        for t in DROPPED_TABLES:
+            c.execute(f"DROP TABLE IF EXISTS {t}")
+    for table, (cols, kind) in ADDED_COLUMNS.items():
+        have = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+        missing = [(n, t) for n, t in cols if n not in have]
+        if missing:
+            with c:
+                for n, t in missing:
+                    c.execute(f"ALTER TABLE {table} ADD COLUMN {n} {t}")
+                # Forget the file hashes so the next sync re-imports and fills the new columns.
+                c.execute("DELETE FROM sources WHERE kind=?", (kind,))

@@ -21,7 +21,3 @@ def results_dir() -> Path:
 
 def db_path() -> Path:
     return Path(os.environ.get("FG_DB", data_dir() / "fourth_and_goal.sqlite")).resolve()
-
-
-def seed_dir() -> Path:
-    return Path(__file__).resolve().parents[1] / "seed" / "handoff"

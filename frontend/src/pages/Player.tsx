@@ -22,7 +22,6 @@ type PlayerResp = {
   games: Game[]; events: Event[]; field_splits: { zone: string; carries: number; targets: number; tds: number; xtd: number; ez_proxy: number }[];
   usage: { week: number; opp_share: number | null; xtd_share: number | null; team_tds: number | null }[];
   matchup: { defense: string; position: string; games: { week: number; offense: string; touchdowns: number; xtd: number; rz_carries: number; rz_targets: number; goal5_carries: number; goal5_targets: number }[] } | null;
-  venom: { venom_score: number; venom_prob: number | null; venom_rank: number; observed_date: string }[];
   definitions: Record<string, string>;
 };
 
@@ -74,13 +73,6 @@ export default function PlayerPage() {
                     <p className="text-xs text-muted">Built from data through {p.data_cutoff}. Injury status: {f.report_status ? String(f.report_status) : f.injury_report_published ? "not listed" : "report not yet published"}.</p>
                   </>
                 ) : <Notice tone="info">No candidate row for {season} Week {week} (bye, inactive, or no earlier games).</Notice>}
-                {d.venom.length > 0 && (
-                  <div className="rounded-lg border border-line p-3 text-sm">
-                    <div className="label mb-1">Venom screenshot (Week {week} only)</div>
-                    {d.venom.map((v) => <div key={v.observed_date}>Score {v.venom_score} · rank {v.venom_rank}{v.venom_prob != null && ` · shown ${pct(v.venom_prob)}`} <span className="text-muted">({v.observed_date})</span></div>)}
-                    <p className="mt-1 text-xs text-muted">A ranking number from a separate product, not our probability and not odds.</p>
-                  </div>
-                )}
               </CardBody>
             </Card>
 

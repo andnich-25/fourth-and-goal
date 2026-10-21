@@ -11,18 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.routes import backtest, data, defenses, overview, players, rankings, top3, venom
-from engine import db, paths, seed
+from app.routes import backtest, data, defenses, overview, players, rankings, top3
+from engine import db, paths
 
 
 @asynccontextmanager
 async def lifespan(_app):
-    c = db.connect(paths.db_path())
-    try:
-        seed.seed_pilot(c)
-        seed.seed_venom(c)
-    finally:
-        c.close()
+    db.connect(paths.db_path()).close()  # creates or migrates the schema
     yield
 
 
@@ -31,7 +26,7 @@ app = FastAPI(lifespan=lifespan, title="Fourth & Goal Analytics API", version=pa
 app.add_middleware(CORSMiddleware, allow_origins=os.environ.get("FG_CORS", "http://localhost:5173,http://127.0.0.1:5173").split(","),
                    allow_methods=["*"], allow_headers=["*"])
 
-for r in (data.router, rankings.router, players.router, defenses.router, top3.router, backtest.router, venom.router, overview.router):
+for r in (data.router, rankings.router, players.router, defenses.router, top3.router, backtest.router, overview.router):
     app.include_router(r)
 
 

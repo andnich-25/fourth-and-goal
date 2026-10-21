@@ -178,7 +178,6 @@ export default function DataSyncPage() {
                   <li>A weekly roster row is not proof a player was active; participation uses box scores and snap counts.</li>
                   <li>Passing TDs thrown by quarterbacks never count as anytime TDs.</li>
                   <li>{d.coverage_tracking ?? "Coverage tracking not connected."}</li>
-                  <li>Venom values are user-entered screenshot observations for the week captured only.</li>
                 </ul>
               </CardBody>
             </Card>
