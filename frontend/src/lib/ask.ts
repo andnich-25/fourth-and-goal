@@ -21,7 +21,7 @@ export type AskData = {
 export type Pick = {
   id: string; player_id: string; name: string; team: string; opp: string; pos: string; game_id: string; market: string; label: string;
   p: number; kind: "td" | "props"; side: "yes" | "over" | "under"; line?: number; price?: number; book?: string; edge?: number;
-  tier?: string; tierRate?: number | null; tierData?: Tier; note?: string; reasons?: string[]; lineSource?: "book" | "usual"; median?: number; range?: [number, number]; dist?: PropDist; recent?: Recent[]; due?: Due;
+  tier?: string; tierRate?: number | null; tierData?: Tier; note?: string; reasons?: string[]; lineSource?: "book" | "usual"; median?: number; range?: [number, number]; dist?: PropDist; recent?: Recent[]; due?: Due; against?: string[]; facts?: string[];
 };
 export type Answer = {
   title: string; summary: string; picks?: Pick[]; groups?: { title: string; picks: Pick[] }[];
@@ -289,8 +289,9 @@ export function answerValue(d: AskData, n: number, f: Filters, markets?: string[
 }
 
 export function answerParlay(d: AskData, legs: number, f: Filters, opts: { market?: string; value?: boolean; sameGame?: boolean } = {}): Answer {
-  const market = opts.market ?? "td";
-  let pool = market === "td" ? tdPool(d, f).slice(0, 40) : propPool(d, market, f).filter((p) => p.p >= 0.5);
+  // No market named: the highest-chance legs from every market (anytime TD and the likelier side of each prop).
+  const market = opts.market ?? "any";
+  let pool = market === "td" ? tdPool(d, f).slice(0, 40) : market === "any" ? anyPool(d, f).slice(0, 60) : propPool(d, market, f).filter((p) => p.p >= 0.5);
   if (new Set(pool.map((p) => p.game_id)).size === 1) opts = { ...opts, sameGame: true }; // a single-game slate (e.g. Thursday)
   if (opts.value) pool = pool.filter((p) => p.price != null && (p.edge as number) >= MIN_EDGE);
   const chosen: Pick[] = [];
@@ -314,11 +315,12 @@ export function answerParlay(d: AskData, legs: number, f: Filters, opts: { marke
   const priced = chosen.every((p) => p.price != null);
   const price = priced ? chosen.reduce((a, p) => a * dec(p.price as number), 1) : undefined;
   return {
-    title: `${opts.value ? "Best value" : "Safest"} ${chosen.length}-leg ${market === "td" ? "TD " : ""}parlay${describe(f) ? ` (${describe(f)})` : ""}`,
+    title: `${opts.value ? "Best value" : "Safest"} ${chosen.length}-leg ${market === "td" ? "TD " : ""}parlay${market === "any" ? " (any market)" : ""}${describe(f) ? ` (${describe(f)})` : ""}`,
     summary: opts.value ? "Built only from legs that beat the best book price, combined for the highest expected return." :
       `The combination most likely to hit, from 40,000 simulated weeks${opts.sameGame ? "" : " (one leg per game)"}.`,
     picks: chosen, parlay: { joint: sim.joint, independent: sim.independent, price, legs: chosen.length },
     notes: [price ? `Best prices multiplied: ${american(price)}, which implies ${pct(1 / price)} vs our ${pct(sim.joint)}.` : "Add prices in the parlay builder to compare against the books.",
+      ...(chosen.some((p) => p.lineSource === "usual") ? ["Some legs use the player's usual line because no book line is loaded for them; check the book's line before betting."] : []),
       ...noteTier(chosen)],
     followups: ["Open this in the parlay builder", "Best value bets this week", "One TD scorer from each game"],
   };
@@ -354,6 +356,69 @@ export function answerPlayer(d: AskData, ids: string[], only?: string): Answer {
       : "No validated chances for this player this week (not eligible, injured, or not enough recent volume).",
     groups, projections: projections.length ? projections : undefined, notes: [...reasons, ...noteTier(groups.flatMap((g) => g.picks)), ...priceNote(d)],
     followups: ["Top 5 TD scorers", "One TD scorer from each game"],
+  };
+}
+
+/* ------------------------------------------------------------------ why */
+/** Everything behind one prop lean, in plain words: support, what argues against it, and the raw numbers. */
+function explainProp(d: AskData, r: PropRow, m: string, forceSide?: "over" | "under"): Pick {
+  const label = d.props[m]?.label ?? m;
+  const book = feedLine(d.feed, m, r.player_id);
+  const line = book ?? usualLine(r, m) ?? Math.floor(r.median) + 0.5;
+  const over = pOver(r.dist as PropDist, line);
+  const side = forceSide ?? (over >= 0.5 ? "over" : "under");
+  const pick = { ...propPick(d, m, r, line, side), lineSource: book != null ? "book" as const : "usual" as const };
+  const pro = (side === "under" ? underReasons : overReasons)(r, m, label, line);
+  const con = (side === "under" ? overReasons : underReasons)(r, m, label, line);
+  const e = r.evidence ?? {};
+  const st = statOf(m);
+  const facts: string[] = [];
+  facts.push(`Projection ${num1(r.median)} (80% range ${num1(r.q10)}–${num1(r.q90)}) against a line of ${line}${book == null ? " (his usual line; no book line loaded)" : ""}.`);
+  const rec = (r.recent ?? []).slice(0, 8);
+  if (rec.length) facts.push(`Last ${rec.length} games, newest first: ${rec.map((g) => `${num1(g.value)} vs ${g.opponent}`).join(", ")}. Over ${line} in ${rec.filter((g) => g.value > line).length} of ${rec.length}.`);
+  const avg = [e[`${st}_cur`] != null ? `season ${num1(e[`${st}_cur`] as number)}` : "", e[`${st}_l3`] != null ? `last 3 ${num1(e[`${st}_l3`] as number)}` : "",
+    e[`${st}_med`] != null ? `typical game ${num1(e[`${st}_med`] as number)}` : ""].filter(Boolean);
+  if (avg.length) facts.push(`His ${lc(label)}: ${avg.join(", ")}.`);
+  const mult = e[`opp_${st}_mult`];
+  if (mult != null) facts.push(`${r.opponent} allows ${Math.abs(Math.round((mult - 1) * 100))}% ${mult >= 1 ? "more" : "fewer"} ${lc(label)} to ${POS_NAME[r.position] ?? r.position} than average (games before this week).`);
+  const role = [e.targets_pg != null ? `${num1(e.targets_pg)} targets/game` : "", e.targets_share != null ? `${Math.round(e.targets_share * 100)}% target share` : "",
+    e.carries_pg != null && r.position !== "WR" && r.position !== "TE" ? `${num1(e.carries_pg)} carries/game` : "", e.attempts_pg != null ? `${num1(e.attempts_pg)} pass attempts/game` : "",
+    e.snap_pct != null ? `${Math.round(e.snap_pct * 100)}% of snaps` : ""].filter(Boolean);
+  if (role.length) facts.push(`Role: ${role.join(", ")}.`);
+  const hist = d.conf?.props?.line_history?.[m]?.find((h) => line >= h.lo && line <= h.hi);
+  if (hist) {
+    const typical = e[`${st}_med`];
+    facts.push(`In testing, players whose usual line was ${hist.lo === hist.hi ? hist.lo : `${hist.lo}–${hist.hi}`} averaged ${num1(hist.avg_actual)} the next game and went over ${pct(hist.over_rate)} of the time (${hist.n.toLocaleString()} games).`
+      + (hist.avg_actual < hist.avg_line && typical != null && r.median < typical ? " Big recent numbers tend to come back down, which is why his projection sits below his recent averages." : ""));
+  }
+  if (e.team_implied_total != null) facts.push(`Game script: his team is projected for ${num1(e.team_implied_total)} points${e.opp_implied_total != null ? `, the opponent ${num1(e.opp_implied_total)}` : ""}.`);
+  return { ...pick, reasons: pro, against: con, facts };
+}
+
+export function answerWhy(d: AskData, ids: string[], market?: string, side?: "over" | "under"): Answer {
+  const id = ids[0];
+  const td = d.td.find((x) => x.player_id === id);
+  const rows = Object.entries(d.props).map(([m, v]) => ({ m, r: v.rows.find((x) => x.player_id === id && x.dist) })).filter((x) => x.r) as { m: string; r: PropRow }[];
+  const name = td?.player_name ?? rows[0]?.r.player_name ?? "This player";
+  const picks: Pick[] = [];
+  if (market && market !== "td") {
+    const x = rows.find((y) => y.m === market);
+    if (x) picks.push(explainProp(d, x.r, market, side));
+  } else if (market === "td" || (!side && td?.p_model != null && !rows.length)) {
+    if (td?.p_model != null) picks.push({ ...tdPick(d, td), reasons: td.reasons.filter((x) => x.sign >= 0).map((x) => x.text), against: td.reasons.filter((x) => x.sign < 0).map((x) => x.text) });
+  } else {
+    // No market named: explain his strongest lean (the side asked about, if any), plus his TD chance for context.
+    const all = rows.map((x) => explainProp(d, x.r, x.m, side)).sort((a, b) => b.p - a.p);
+    if (all[0]) picks.push(all[0]);
+    if (td?.p_model != null && !side) picks.push({ ...tdPick(d, td), reasons: td.reasons.filter((x) => x.sign >= 0).map((x) => x.text), against: td.reasons.filter((x) => x.sign < 0).map((x) => x.text) });
+  }
+  if (!picks.length) return { title: `Why: ${name}`, summary: `No validated chance for ${name}${market ? ` in ${d.props[market]?.label ?? market}` : ""} this week, so there is nothing to explain.`, notes: [], followups: ["Top 5 TD scorers"] };
+  const top = picks[0];
+  return {
+    title: `Why ${top.label.toLowerCase().startsWith("anytime") ? `${name} to score` : `${name}: ${top.label}`}`,
+    summary: `The model gives this a ${pct(top.p)} chance${top.tierData?.rate != null ? ` (${top.tier}: picks in that range have hit ${pct(top.tierData.rate)} of the time on unseen weeks)` : ""}. It weighs everything below together; no single factor decides it.`,
+    picks, notes: [...(top.facts ?? []), ...priceNote(d)],
+    followups: [`${name} all props`, "Who will fall short this week?"],
   };
 }
 
@@ -643,6 +708,7 @@ export function parse(d: AskData, raw: string): Parsed {
   const base = { n, market, anyMarket: anyM || noTd, noTd, side: line != null && !side ? "over" as const : side, line, filters, players: pl.ids, value, sameGame, ambiguous: pl.ambiguous } as const;
 
   if (/\b(what can you|help me|how do i use|what do you know)\b/.test(q)) return { ...base, intent: "help" };
+  if (pl.ids.length && /\b(why|explain|reasons?|reasoning|how come|what makes|what is behind|whats behind|justify|based on what)\b/.test(q)) return { ...base, intent: "why" };
   if (/\b(accura|track record|hit rate|how good is (the|your) model|trust (the|your)|calibrat|how often .* (hit|right))/.test(q)) return { ...base, intent: "record" };
   if (/\b(injur|questionable|doubtful|hurt|out this week|inactive)/.test(q) && !/\b(parlay|best|top)\b/.test(q)) return { ...base, intent: "injuries" };
   if (/\b(avoid|fade|stay away|overpriced|overrated|traps?|worst bets?|bad bets?)\b/.test(q)) return { ...base, intent: "avoid" };
@@ -670,9 +736,10 @@ export function answer(d: AskData, raw: string): Answer {
     case "record": a = answerRecord(d); break;
     case "injuries": a = answerInjuries(d, f); break;
     case "pergame": a = answerPerGame(d, p.market ?? (p.noTd ? "any-props" : p.anyMarket ? "any" : "td"), f); break;
-    case "parlay": a = answerParlay(d, Math.min(Math.max(p.n ?? 3, 2), 8), f, { market: p.market, value: p.value, sameGame: p.sameGame }); break;
+    case "parlay": a = answerParlay(d, Math.min(Math.max(p.n ?? 3, 2), 8), f, { market: p.market ?? (/\b(tds?|touchdowns?|scor|anytime)/.test(norm(raw)) && !p.anyMarket ? "td" : "any"), value: p.value, sameGame: p.sameGame }); break;
     case "sleepers": a = answerSleepers(d, p.n ?? 6, f); break;
     case "due": a = answerDue(d, p.n ?? 8, f); break;
+    case "why": a = answerWhy(d, p.players, p.market ?? (/\b(td|touchdown|score)/.test(norm(raw)) ? "td" : undefined), /\bunder\b/.test(norm(raw)) ? "under" : /\bover\b/.test(norm(raw)) ? "over" : undefined); break;
     case "any": a = answerAny(d, Math.min(p.n ?? 5, 25), f, p.noTd); break;
     case "player": a = answerPlayer(d, p.players.slice(0, 3), p.market ?? (/\b(td|touchdown|score)/.test(norm(raw)) ? "td" : undefined)); break;
     case "avoid": a = answerAvoid(d, p.n ?? 8, f); break;
@@ -694,6 +761,7 @@ export const pickJson = (p: Pick) => ({ player: p.name, team: p.team, opponent: 
   price_implied_chance: p.price != null ? Number((1 / dec(p.price)).toFixed(3)) : null, edge: p.edge != null ? Number(p.edge.toFixed(3)) : null,
   tier: p.tier ?? null, tier_past_hit_rate: p.tierRate != null ? Number(p.tierRate.toFixed(3)) : null, note: p.note ?? null,
   projection: p.median != null ? { median: p.median, range_10_90: p.range } : null, reasons: p.reasons ?? null,
+  factors_against: p.against ?? null, key_numbers: p.facts ?? null,
   due: p.due ? { tds: p.due.actual, expected_tds: Number(p.due.expected.toFixed(2)), games: p.due.games } : null,
   line_source: p.lineSource === "usual" ? "player's usual line (no book line loaded)" : p.line != null ? "book line" : null });
 

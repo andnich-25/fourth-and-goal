@@ -88,6 +88,26 @@ describe("ask parser", () => {
     expect(names).not.toContain("Deep Reserve");
   });
 
+  it("explains why a pick leans the way it does", () => {
+    const henry = { player_id: "h", player_name: "Hunter Henry", team: "NE", opponent: "CHI", position: "TE", game_id: "2026_07_NE_CHI", eligible: 1,
+      median: 3.6, q10: 1, q90: 6, recent: [2, 3, 5, 2, 3, 4, 1, 6].map((v, i) => ({ season: 2026, week: 6 - i, opponent: "BUF", value: v })),
+      evidence: { receptions_med: 4, receptions_l3: 3.3, receptions_cur: 3.5, opp_receptions_mult: 0.85, targets_pg: 5.1, snap_pct: 0.8, team_implied_total: 19.5 },
+      dist: { type: "quantiles" as const, q: Array.from({ length: 99 }, (_, i) => 0.5 + i * 0.065), platt: [1, 0] as [number, number] } };
+    const dd: AskData = { ...d, props: { receptions: { label: "Receptions", rows: [henry] } } };
+    const p = parse(dd, "Why is it suggesting Hunter Henry's under?");
+    expect(p.intent).toBe("why");
+    const a = answer(dd, "Why is it suggesting Hunter Henry's under?");
+    expect(a.picks?.[0].side).toBe("under");
+    expect(a.picks?.[0].reasons?.some((r) => r.includes("CHI allows 15% fewer"))).toBe(true);
+    expect(a.notes.some((n) => n.startsWith("Projection 3.6"))).toBe(true);
+    expect(a.notes.some((n) => n.includes("Last 8 games"))).toBe(true);
+  });
+
+  it("builds parlays from every market unless TDs are asked for", () => {
+    expect(answer(d, "Give me the best 3 leg parlay for tonights game").title).toContain("any market");
+    expect(answer(d, "3 leg TD parlay").title).toContain("TD parlay");
+  });
+
   it("flags due players from expected vs actual TDs", () => {
     const due = { ...d, td: d.td.map((r) => (r.player_id === "6" ? { ...r, features: { cur_xtd: 3.4, cur_tds: 1, n_games_cur: 6 } } : r)) };
     const a = answer(due, "who is due for a touchdown");

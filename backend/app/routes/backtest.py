@@ -100,6 +100,27 @@ def tuning():
             "comparison": r["comparison"], "adopt": r["adopt"]}
 
 
+def _line_history(g, min_n: int = 40) -> list[dict]:
+    """Group the graded games by line, merging neighbouring lines until each group has min_n games."""
+    groups, cur = [], []
+    for _, x in g.groupby("line"):
+        cur.append(x)
+        if sum(len(y) for y in cur) >= min_n:
+            groups.append(cur); cur = []
+    if cur:
+        if groups:
+            groups[-1] += cur
+        else:
+            groups.append(cur)
+    out = []
+    for parts in groups:
+        import pandas as pd  # noqa: PLC0415
+        x = pd.concat(parts)
+        out.append({"lo": float(x.line.min()), "hi": float(x.line.max()), "n": int(len(x)), "avg_line": float(x.line.mean()),
+                    "avg_actual": float(x.actual.mean()), "over_rate": float(x.y.mean()), "avg_p_over": float(x.p_over.mean())})
+    return out
+
+
 # Confidence tiers: plain-language bands with the hit rate of every past walk-forward pick in that band.
 TD_TIERS = [("Strong", 0.50, 1.01), ("Solid", 0.35, 0.50), ("Lean", 0.20, 0.35), ("Long shot", 0.0, 0.20)]
 PROP_TIERS = [("Strong", 0.65, 1.01), ("Solid", 0.58, 0.65), ("Lean", 0.53, 0.58), ("Coin flip", 0.0, 0.53)]
@@ -136,7 +157,7 @@ def confidence(c: sqlite3.Connection = Depends(get_db)):
         for market, r in rep["markets"].items():
             model = r["gate"]["promoted"]
             if model:
-                parts.append(pd.read_sql_query("SELECT ? AS market, season, week, p_over, (actual > line) AS y FROM prop_backtest WHERE run_id=? "
+                parts.append(pd.read_sql_query("SELECT ? AS market, season, week, p_over, line, actual, (actual > line) AS y FROM prop_backtest WHERE run_id=? "
                                                "AND market=? AND model=? AND actual IS NOT NULL", c, params=(market, rep["run_id"], market, model)))
         if parts:
             pb = pd.concat(parts)
@@ -153,6 +174,9 @@ def confidence(c: sqlite3.Connection = Depends(get_db)):
                                                   "strong_n": int((g.p_over <= 0.35).sum()),
                                                   "strong_rate": float(1 - g.y[g.p_over <= 0.35].mean()) if (g.p_over <= 0.35).any() else None}
                                                  for mk, g in pb[pb.p_over < 0.5].groupby("market")],
+                            # What players at each usual line actually did next game: shows regression to the mean behind
+                            # projections that sit below a player's recent numbers.
+                            "line_history": {mk: _line_history(g) for mk, g in pb.groupby("market")},
                             "note": "Prop tiers use the side the model favored at a reference line (the player's recent median), "
                                     "because past sportsbook lines are not available."}
     return out

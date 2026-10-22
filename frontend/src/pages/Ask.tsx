@@ -218,6 +218,9 @@ export function PickList({ picks, suffix }: { picks: Pick[]; suffix: string }) {
               {p.note && <Badge tone="warn">{p.note}</Badge>}
             </div>
             {p.reasons && p.reasons.length > 0 && <ul className="mt-1 space-y-0.5 text-xs text-muted">{p.reasons.map((r) => <li key={r}>• {r}</li>)}</ul>}
+            {p.against && p.against.length > 0 && (
+              <div className="mt-1 text-xs text-muted"><span className="font-medium text-fg">Working against it:</span>
+                <ul className="mt-0.5 space-y-0.5">{p.against.map((r) => <li key={r}>• {r}</li>)}</ul></div>)}
           </div>
           <div className="text-right">
             <div className="font-display text-lg font-semibold">{pct(p.p, 0)}</div>

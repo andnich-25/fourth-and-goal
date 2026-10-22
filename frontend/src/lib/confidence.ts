@@ -6,6 +6,7 @@ export type Tier = { tier: string; lo: number; hi: number; n: number; hits: numb
 export type Confidence = {
   td: { model: string; weeks: number; first_season: number; tiers: Tier[] } | null;
   props: { weeks: number; first_season: number; tiers: Tier[]; note: string; by_side?: { over: Tier[]; under: Tier[] };
+    line_history?: Record<string, { lo: number; hi: number; n: number; avg_line: number; avg_actual: number; over_rate: number; avg_p_over: number }[]>;
     unders_by_market?: { market: string; label: string; n: number; hits: number; rate: number; avg_chance: number; strong_n: number; strong_rate: number | null }[] } | null;
 };
 

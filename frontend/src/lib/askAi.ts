@@ -4,7 +4,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaTool } from "@anthropic-ai/sdk/helpers/beta/json-schema.mjs";
 import {
-  answerAny, answerDue, answerGame, answerInjuries, answerJson, answerParlay, answerPerGame, answerPlayer, answerProps, answerRecord, answerSleepers, answerTop,
+  answerAny, answerDue, answerWhy, answerGame, answerInjuries, answerJson, answerParlay, answerPerGame, answerPlayer, answerProps, answerRecord, answerSleepers, answerTop,
   answerUnders, answerValue, gameLabel, parse, type AskData, type Filters,
 } from "@/lib/ask";
 import { MODEL } from "@/lib/aiKey";
@@ -60,8 +60,8 @@ function tools(d: AskData) {
       run: async (i) => out(answerJson(answerValue(d, i.limit, filters(i), i.markets))),
     }),
     betaTool({
-      name: "build_parlay", description: "Builds a parlay with 40,000 correlated simulations: either the most likely combination, or (value=true) only legs that beat the best price, combined for the highest expected return.",
-      inputSchema: { type: "object", properties: { legs: { type: "integer", minimum: 2, maximum: 8 }, market: { type: "string", enum: ["td", ...markets] }, value: { type: "boolean" }, same_game: { type: "boolean", description: "Allow several legs from one game" }, position: POSITION, teams: TEAMS, day: DAY }, required: ["legs"], additionalProperties: false } as const,
+      name: "build_parlay", description: "Builds a parlay with 40,000 correlated simulations: either the most likely combination, or (value=true) only legs that beat the best price, combined for the highest expected return. market 'any' (the default) draws from every market: anytime TD and every prop; use 'td' only when the visitor asks for touchdowns.",
+      inputSchema: { type: "object", properties: { legs: { type: "integer", minimum: 2, maximum: 8 }, market: { type: "string", enum: ["any", "td", ...markets] }, value: { type: "boolean" }, same_game: { type: "boolean", description: "Allow several legs from one game" }, position: POSITION, teams: TEAMS, day: DAY }, required: ["legs"], additionalProperties: false } as const,
       run: async (i) => out(answerJson(answerParlay(d, i.legs, filters(i), { market: i.market, value: i.value, sameGame: i.same_game }))),
     }),
     betaTool({
@@ -70,6 +70,15 @@ function tools(d: AskData) {
       run: async (i) => {
         const ids = parse(d, i.names.join(" and ")).players;
         return ids.length ? out(answerJson(answerPlayer(d, ids))) : out({ error: "No player with that name has chances this week." });
+      },
+    }),
+    betaTool({
+      name: "explain_pick", description: "Why the model leans the way it does on one player: the line, projection and range, his recent games against the line, season/last-3/typical averages, the opponent's defense against his position, his role (targets, share, snaps), game script (implied points), the factors supporting the lean and the factors working against it, plus the tier's past hit rate. Use for any 'why' or 'explain' question.",
+      inputSchema: { type: "object", properties: { name: { type: "string", description: "Player name" }, market: { type: "string", enum: ["td", ...markets], description: "Leave out to explain his strongest lean" }, side: SIDE }, required: ["name"], additionalProperties: false } as const,
+      run: async (i) => {
+        const ids = parse(d, i.name).players;
+        return ids.length ? out(answerJson(answerWhy(d, ids, i.market, i.side)))
+          : out({ error: "No player with that name has chances this week." });
       },
     }),
     betaTool({
@@ -111,6 +120,7 @@ Rules:
 - Every chance, price, line, edge, projection and hit rate you mention must come from a tool result in this conversation. Never estimate, round up or add numbers of your own. If the tools do not cover something (weather, news, a market the site does not model), say so plainly.
 - Chances are validated model probabilities; "tier" and "tier_past_hit_rate" say how often past picks in that range hit. Prefer higher chances and, when prices are loaded, real edges. Mention injury notes.
 - Match the market to the question. Only use TD tools when the visitor asks about touchdowns or scorers. If they say "any prop", "any market", "safest pick" or name no market, use safest_any_market (or best_per_game with market "any" for one per game).
+- For "why" questions, call explain_pick and answer in plain words from its numbers: what supports the lean, what works against it, and how confident the model is. Do not invent factors the tool did not return.
 - Call several tools when the question needs it (for example list_games, then best_per_game). Pass filters (position, teams, day) when the question names them.
 - Keep the answer short and scannable: a one-line lead, then a list of picks (player, team, bet, our chance, best price if any), then at most two short caveats. No guarantees; book prices are sharp and no bet is a sure thing.`;
 
