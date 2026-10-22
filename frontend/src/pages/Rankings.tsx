@@ -23,6 +23,10 @@ function useDebounced<T>(v: T, ms = 250) {
   return d;
 }
 
+// Advanced columns start hidden to keep the table readable; "Columns" turns them back on.
+const SIMPLE_COLS: VisibilityState = { score: false, goal5_carries_pg: false, ez_proxy_pg: false, xtd_pg: false, xtd_share: false,
+  team_implied_total: false, opp_def_pos_td_pg: false, flags: false };
+
 export default function RankingsPage() {
   const { season, week } = useSeasonWeek();
   const suffix = useLinkSuffix();
@@ -37,9 +41,9 @@ export default function RankingsPage() {
   const [pageSize, setPageSize] = React.useState(50);
   const [expanded, setExpanded] = React.useState<string | null>(null);
   const [visibility, setVisibility] = React.useState<VisibilityState>(() => {
-    try { return JSON.parse(localStorage.getItem("fg-cols") || "{}"); } catch { return {}; }
+    try { return { ...SIMPLE_COLS, ...JSON.parse(localStorage.getItem("fg-cols-v2") || "{}") }; } catch { return SIMPLE_COLS; }
   });
-  React.useEffect(() => { try { localStorage.setItem("fg-cols", JSON.stringify(visibility)); } catch { /* ignore */ } }, [visibility]);
+  React.useEffect(() => { try { localStorage.setItem("fg-cols-v2", JSON.stringify(visibility)); } catch { /* ignore */ } }, [visibility]);
   const q = useDebounced(search);
   React.useEffect(() => setPage(1), [positions, q, team, eligibleOnly, sorting, season, week]);
 
@@ -109,7 +113,7 @@ export default function RankingsPage() {
 
   return (
     <div className="space-y-4">
-      <PageTitle kicker={`${season} · Week ${week}`} title="Player rankings">
+      <PageTitle kicker={`${season} · Week ${week}`} title="Anytime TD">
         {d?.run_id && <ModelBadge version={d.model_version} calibrated={calibrated} />}
         <Button variant="outline" size="sm" onClick={() => api.download("/export/rankings.csv", { season, week })}><Download className="h-3.5 w-3.5" /> Export CSV</Button>
       </PageTitle>

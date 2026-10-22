@@ -137,11 +137,7 @@ function Build({ model, ranks, season, week }: { model?: ParlayModel; ranks?: Ra
 
   return (
     <>
-      <Notice tone="info" title="How this works">
-        Add legs from every validated market at once (All markets, best chance first), or pick one market and type the book's line. Each leg's chance comes from a model that beat
-        baselines on unseen weeks. The slip is then simulated 40,000 times: legs in different games are independent, legs in the same game move
-        together the way they have in past games. Type each book's price and the best one is used. Nothing here is a sure thing.
-      </Notice>
+      <p className="text-sm text-muted">Pick legs, or tap Suggest. Every slip is simulated 40,000 times, with legs in the same game moving together the way they have in past games. Nothing here is a sure thing.</p>
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,5fr)_minmax(0,4fr)]">
         <Picker ranks={ranks} season={season} week={week} slip={slip} add={add} buckets={buckets} useCorr={useCorr} setSlip={(s) => setSlip(s.map(withFeed))} feed={feed} />
         <div className="min-w-0 space-y-5">

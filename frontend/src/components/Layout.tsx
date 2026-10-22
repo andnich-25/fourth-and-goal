@@ -2,7 +2,7 @@ import * as React from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity, BarChart3, BookOpen, Database, Dices, MessageCircleQuestion, Flame, LayoutDashboard, ListOrdered, Moon, Settings, Shield, SlidersHorizontal, Sun, Target, Percent, Menu, X,
+  Activity, BarChart3, BookOpen, Dices, MessageCircleQuestion, LayoutDashboard, ListOrdered, Moon, Settings, Shield, SlidersHorizontal, Sun, Percent, Menu, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/format";
@@ -15,26 +15,21 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
     { to: "/", label: "This week", short: "Home", icon: LayoutDashboard, end: true },
     { to: "/ask", label: "Ask", icon: MessageCircleQuestion },
     { to: "/builder", label: "Parlay builder", short: "Parlay", icon: Dices },
-    { to: "/parlay", label: "Top 3 & locks", short: "Top 3", icon: Target },
   ] },
   { title: "Research", items: [
-    { to: "/rankings", label: "All players", icon: ListOrdered },
     { to: "/props", label: "Player props", short: "Props", icon: SlidersHorizontal },
+    { to: "/rankings", label: "Anytime TD", short: "TDs", icon: ListOrdered },
     { to: "/hitrates", label: "Hit rates", icon: Percent },
-    { to: "/trends", label: "Trends", icon: Flame },
     { to: "/defenses", label: "Defenses", icon: Shield },
   ] },
   { title: "Proof", items: [
     { to: "/how", label: "How it works", icon: BookOpen },
     { to: "/backtest", label: "Track record", icon: BarChart3 },
   ] },
-  { title: "", items: [
-    { to: "/data", label: "Data", icon: Database },
-    { to: "/settings", label: "Settings", icon: Settings },
-  ] },
+  { title: "", items: [{ to: "/settings", label: "Settings", icon: Settings }] },
 ];
 const NAV = SECTIONS.flatMap((s) => s.items);
-const MOBILE = [NAV[0], NAV[1], NAV[2], NAV[3]];
+const MOBILE = [NAV[0], NAV[3], NAV[1], NAV[2]];
 const NBA_SECTIONS: { title: string; items: NavItem[] }[] = [
   { title: "Picks", items: [
     { to: "/nba", label: "Today", short: "Home", icon: LayoutDashboard, end: true },

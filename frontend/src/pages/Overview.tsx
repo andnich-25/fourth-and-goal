@@ -1,17 +1,17 @@
 import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { ArrowRight, ArrowUp, MessageCircleQuestion, BadgeDollarSign, ChevronDown, Crosshair, Dices, ShieldAlert, Target, TrendingUp } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowUp, MessageCircleQuestion, Dices, Target, TrendingUp } from "lucide-react";
 import { api } from "@/lib/api";
 import { chicago, cn, kickoff, num, pct } from "@/lib/format";
 import { tierFor, useConfidence } from "@/lib/confidence";
-import { feedLine, useFeed } from "@/lib/feed";
-import { pOver, type PropDist } from "@/lib/props";
 import { useLinkSuffix, useSeasonWeek } from "@/lib/state";
+import { anyPool, isProven } from "@/lib/ask";
+import { useAskData } from "@/pages/Ask";
 import type { ProbMetrics, RankingsResponse, Top3Response, TopN, TopPolicy } from "@/lib/types";
 import { PageTitle } from "@/components/Layout";
 import { Button, Card, CardBody, CardHeader, ErrorState, LoadingBlock, Notice, PosBadge, Skeleton, Stat, TeamBadge } from "@/components/ui";
-import { Estimate, Flags, NoDataState, ReasonList, TierBadge } from "@/components/shared";
+import { NoDataState, TierBadge } from "@/components/shared";
 
 type Overview = {
   season: number; week: number; ready: boolean; data_loaded: boolean; analytics_through_week: number | null;
@@ -45,74 +45,61 @@ export default function OverviewPage() {
       {d?.error && <Notice tone="danger" title="Last data refresh stopped">{d.error}</Notice>}
       {completed && <Notice tone="info">This week is finished. The picks were made before kickoff using earlier games only; results are shown.</Notice>}
 
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {q.isLoading && Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-14 w-36 shrink-0" />)}
+        {d?.games.map((g) => (
+          <div key={g.game_id} className="min-w-[150px] shrink-0 rounded-lg border border-line bg-surface px-3 py-2 text-sm">
+            <div className="flex items-center gap-1.5"><TeamBadge team={g.away} /><span className="text-muted">@</span><TeamBadge team={g.home} />
+              {g.home_score != null && <span className="num ml-auto text-xs font-medium">{g.away_score}–{g.home_score}</span>}</div>
+            <div className="mt-1 text-xs text-muted">{kickoff(g.gameday, g.gametime)}{g.total ? ` · O/U ${g.total}` : ""}</div>
+          </div>
+        ))}
+      </div>
+
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <Top3Card t={d?.top3} loading={q.isLoading} suffix={suffix} />
+        <StrongestCard season={season} week={week} suffix={suffix} />
         <div className="space-y-5">
-          <ValueCard season={season} week={week} suffix={suffix} />
+          <Top3Card t={d?.top3} loading={q.isLoading} suffix={suffix} />
           {week > 1 && <LastWeekCard season={season} week={week - 1} suffix={suffix} />}
           <TrackRecordCard p={d?.model_performance ?? null} loading={q.isLoading} suffix={suffix} />
         </div>
       </div>
-
-      <Card>
-        <CardHeader title="This week's games" subtitle="Projected points for each team, from the betting line" />
-        <div className="flex gap-3 overflow-x-auto p-4 sm:p-5">
-          {q.isLoading && Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-24 w-44 shrink-0" />)}
-          {d?.games.map((g) => (
-            <div key={g.game_id} className="w-44 shrink-0 rounded-lg border border-line bg-bg/40 p-3">
-              <div className="mb-2 text-[11px] text-muted">{kickoff(g.gameday, g.gametime)}</div>
-              {[{ t: g.away, imp: g.away_implied, s: g.away_score }, { t: g.home, imp: g.home_implied, s: g.home_score }].map((x, i) => (
-                <div key={x.t} className="flex items-center justify-between py-0.5">
-                  <span className="flex items-center gap-2"><TeamBadge team={x.t} />{i === 1 && <span className="text-[10px] text-muted">home</span>}</span>
-                  <span className="num text-sm font-medium">{x.s != null ? x.s : num(x.imp, 1)}</span>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      <details className="card group">
-        <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-medium sm:px-5">
-          More research for this week <ChevronDown className="h-4 w-4 text-muted transition-transform group-open:rotate-180" />
-        </summary>
-        <div className="grid gap-5 border-t border-line p-4 sm:p-5 lg:grid-cols-2">
-          <div>
-            <div className="label mb-2 flex items-center gap-2"><Crosshair className="h-3.5 w-3.5 text-accent" />Most red-zone chances per game</div>
-            <ul className="divide-y divide-line">
-              {d?.opportunity_leaders.map((o) => (
-                <li key={o.player_id}>
-                  <Link to={`/players/${o.player_id}${suffix}`} className="flex items-center gap-3 py-2 hover:text-accent">
-                    <TeamBadge team={o.team} />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{o.player_name} <span className="text-muted">vs {o.opponent}</span></div>
-                      <div className="text-xs text-muted">{num(o.rz_carries_pg)} red-zone carries · {num(o.rz_targets_pg)} red-zone targets per game</div>
-                    </div>
-                    <PosBadge pos={o.position} />
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div>
-            <div className="label mb-2 flex items-center gap-2"><ShieldAlert className="h-3.5 w-3.5 text-warn" />Defenses allowing the most TDs to a position</div>
-            <ul className="divide-y divide-line">
-              {d?.defense_vulnerabilities.map((v) => (
-                <li key={v.defense + v.position}>
-                  <Link to={`/defenses/${v.defense}${suffix}`} className="flex items-center gap-3 py-2 hover:text-accent">
-                    <TeamBadge team={v.defense} />
-                    <div className="min-w-0 flex-1 text-sm">{num(v.tds_pg, 2)} {v.position} TDs per game (league {num(v.league_tds_pg, 2)})
-                      <div className="text-xs text-muted">{v.games} games · faces {v.offense}</div></div>
-                    <PosBadge pos={v.position} />
-                  </Link>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 text-xs text-muted">Across 2019–2025, a defense's TDs allowed barely repeated from one half of the season to the other, so the model only nudges for it. See <Link className="text-accent" to={`/trends${suffix}`}>Trends</Link>.</p>
-          </div>
-        </div>
-      </details>
     </div>
+  );
+}
+
+/** The week's strongest picks in any market (anytime TD and every prop), only from tiers that hit 50%+ on unseen weeks.
+ *  Same pool as Ask's "safest picks" answer, so the two always agree. */
+function StrongestCard({ season, week, suffix }: { season: number; week: number; suffix: string }) {
+  const { data, loading } = useAskData(season, week);
+  const picks = data ? anyPool(data).filter((p) => isProven(data, p)).slice(0, 12) : [];
+  const strong = data?.conf?.props?.tiers.find((t) => t.tier === "Strong");
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader title="Strongest picks this week" icon={<Target className="h-4 w-4 text-accent" />}
+        subtitle={strong?.rate != null ? `Strong prop picks hit ${pct(strong.rate, 0)} of ${strong.n.toLocaleString()} unseen games in testing. One pick per player.` : "One pick per player, strongest first."} />
+      {loading && <LoadingBlock rows={6} className="p-5" />}
+      {!loading && !picks.length && <CardBody className="text-sm text-muted">No pick reaches a proven confidence level yet this week.</CardBody>}
+      <div className="divide-y divide-line/60">
+        {picks.map((p) => (
+          <Link key={p.id} to={`/players/${p.player_id}${suffix}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 hover:bg-raised/50 sm:flex-nowrap sm:px-5">
+            <div className="min-w-0 flex-1 basis-44">
+              <div className="flex items-center gap-2 font-medium"><span className="truncate">{p.name}</span><PosBadge pos={p.pos} /></div>
+              <div className="text-xs text-muted">{p.team} vs {p.opp}{p.lineSource === "usual" ? " · usual line" : p.lineSource === "book" ? " · book line" : ""}</div>
+            </div>
+            <div className="ml-auto text-right">
+              <div className="font-semibold">{p.label}</div>
+              <div className="flex items-center justify-end gap-1.5 text-xs text-muted"><span className="font-bold text-fg">{pct(p.p, 0)}</span><TierBadge tier={p.tierData ?? null} compact /></div>
+            </div>
+          </Link>
+        ))}
+      </div>
+      {!!picks.length && (
+        <div className="border-t border-line bg-bg/30 px-5 py-3 text-xs text-muted">
+          Never guaranteed. Re-check injury news before kickoff. <Link to={`/props${suffix}`} className="text-accent hover:underline">See every player</Link>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -123,109 +110,36 @@ function Top3Card({ t, loading, suffix }: { t?: Top3Response; loading: boolean; 
       <CardHeader
         title="Top 3 touchdown picks"
         icon={<Target className="h-4 w-4 text-accent" />}
-        subtitle="Most likely to score a rushing or receiving TD, one per game, healthy and playing regularly"
-        action={<Link to={`/parlay${suffix}`}><Button size="sm" variant="outline">Lock picks <ArrowRight className="h-3.5 w-3.5" /></Button></Link>}
+        subtitle="Most likely to score, one per game"
       />
       {loading && <LoadingBlock rows={3} className="p-5" />}
       {t && !t.run_id && <NoDataState reason={t.empty_reason} />}
       {t?.run_id && t.legs.length === 0 && (
         <div className="p-5"><Notice tone="warn" title="No leg met every evidence rule">The shortlist returns fewer than three when evidence is insufficient.</Notice></div>
       )}
-      <div className="divide-y divide-line">
+      <div className="divide-y divide-line/60">
         {t?.legs.map((l, i) => (
-          <div key={l.player_id} className="grid gap-4 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:p-5">
-            <div className="flex items-center gap-3 sm:block">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10 font-display text-sm font-bold text-accent">{i + 1}</div>
+          <Link key={l.player_id} to={`/players/${l.player_id}${suffix}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-raised/50 sm:px-5">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-accent/10 font-display text-sm font-bold text-accent">{i + 1}</div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 font-medium"><span className="truncate">{l.player_name}</span><PosBadge pos={l.position} /></div>
+              <div className="text-xs text-muted">{l.team} vs {l.opponent}</div>
             </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <Link to={`/players/${l.player_id}${suffix}`} className="font-display text-lg font-semibold hover:text-accent">{l.player_name}</Link>
-                <PosBadge pos={l.position} />
-                <span className="text-sm text-muted">{l.team} vs {l.opponent}</span>
-              </div>
-              <div className="mt-1.5"><TierBadge tier={tierFor(conf.data, "td", l.p_model)} /></div>
-              <div className="mt-2"><ReasonList reasons={l.reasons} limit={3} /></div>
-              <Flags flags={l.flags} className="mt-2" />
-              {l.p_model != null && l.p_model >= 0.7 && (
-                <p className="mt-2 text-xs text-warn">Few past predictions were this high, so this chance is less certain than lower ones.</p>
-              )}
+            <div className="text-right">
+              <div className="num font-semibold">{t.calibrated && l.p_model != null ? pct(l.p_model, 0) : num(l.score, 0)}</div>
+              <TierBadge tier={tierFor(conf.data, "td", l.p_model)} compact />
             </div>
-            <div className="sm:text-right"><Estimate p={l.p_model} score={l.score} calibrated={!!t.calibrated} size="lg" /><div className="mt-1 text-xs text-muted">Rank #{l.rank}</div></div>
-          </div>
+          </Link>
         ))}
       </div>
       {t?.run_id && (
         <div className="border-t border-line bg-bg/30 px-5 py-3 text-xs text-muted">
-          Updated {chicago(t.as_of)} · never guaranteed · re-check injury news before kickoff.
+          Updated {chicago(t.as_of)}
         </div>
       )}
     </Card>
   );
 }
-
-type ValueRow = { key: string; player_id: string; name: string; team: string; position: string; label: string; chance: number;
-  price: number; book: string; edge: number; kind: "td" | "props" };
-type PropsLite = { rows: { player_id: string; player_name: string; team: string; position: string; eligible: number; dist: PropDist | null }[] };
-
-/** Legs where our chance is furthest above the chance implied by the best price any book offers. */
-function ValueCard({ season, week, suffix }: { season: number; week: number; suffix: string }) {
-  const feed = useFeed(season, week);
-  const conf = useConfidence();
-  const ranks = useQuery({ queryKey: ["rankings-all", season, week], queryFn: () => api.get<RankingsResponse>("/rankings", { season, week, eligible_only: true, page_size: 2000, sort: "rank", order: "asc" }) });
-  const markets = useQuery({ queryKey: ["props-markets"], queryFn: () => api.get<{ markets: { market: string; label: string; validated: boolean }[] }>("/props/markets") });
-  const validated = (markets.data?.markets ?? []).filter((m) => m.validated);
-  const props = useQueries({ queries: validated.map((m) => ({ queryKey: ["props", season, week, m.market], enabled: !!feed.at,
-    queryFn: () => api.get<PropsLite>("/props", { season, week, market: m.market }) })) });
-  const rows: ValueRow[] = [];
-  const best = (list: { book: string; price: number }[]) => list.reduce<{ book: string; price: number } | null>((b, r) => (!b || dec(r.price) > dec(b.price) ? r : b), null);
-  if (feed.at) {
-    for (const r of ranks.data?.rows ?? []) {
-      if (r.p_model == null) continue;
-      const b = best(feed.get("td", r.player_id, "yes"));
-      if (b) rows.push({ key: `td:${r.player_id}`, player_id: r.player_id, name: r.player_name, team: r.team, position: r.position, label: "Anytime TD",
-        chance: r.p_model, price: b.price, book: b.book, edge: r.p_model - 1 / dec(b.price), kind: "td" });
-    }
-    validated.forEach((m, i) => {
-      for (const r of props[i]?.data?.rows ?? []) {
-        if (!r.dist || !r.eligible) continue;
-        const line = feedLine(feed, m.market, r.player_id);
-        if (line == null) continue;
-        const over = pOver(r.dist, line);
-        for (const side of ["over", "under"] as const) {
-          const b = best(feed.get(m.market, r.player_id, side).filter((x) => x.line === line));
-          if (!b) continue;
-          const chance = side === "over" ? over : 1 - over;
-          rows.push({ key: `${m.market}:${r.player_id}:${side}`, player_id: r.player_id, name: r.player_name, team: r.team, position: r.position,
-            label: `${side === "over" ? "Over" : "Under"} ${line} ${m.label.toLowerCase()}`, chance, price: b.price, book: b.book,
-            edge: chance - 1 / dec(b.price), kind: "props" });
-        }
-      }
-    });
-  }
-  rows.sort((a, b) => b.edge - a.edge);
-  const top = rows.filter((r) => r.edge >= MIN_EDGE).slice(0, 6);
-  return (
-    <Card>
-      <CardHeader title="Best prices vs our chances" icon={<BadgeDollarSign className="h-4 w-4 text-accent" />}
-        subtitle={feed.at ? `Best price across US books, ${chicago(feed.at)}` : "Sportsbook prices"} />
-      {!feed.at ? <CardBody className="text-sm text-muted">Prices appear here after the weekly price pull (Saturday morning). Until then, type prices into the parlay builder.</CardBody>
-        : !top.length ? <CardBody className="text-sm text-muted">No leg clears the bar this week (our chance at least {pct(MIN_EDGE, 0)} above the best price). Passing is part of winning: book prices are sharp.</CardBody> : (
-          <ul className="divide-y divide-line">{top.map((r) => (
-            <li key={r.key} className="flex items-center gap-3 px-4 py-2.5 sm:px-5">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium"><Link className="hover:text-accent" to={`/players/${r.player_id}${suffix}`}>{r.name}</Link> <span className="text-xs text-muted">{r.team}</span></div>
-                <div className="text-xs text-muted">{r.label} · {r.price > 0 ? `+${r.price}` : r.price} at {r.book}</div>
-              </div>
-              <div className="text-right"><div className="text-sm font-semibold">{pct(r.chance, 0)} <span className="font-normal text-muted">vs {pct(1 / dec(r.price), 0)}</span></div>
-                <TierBadge tier={tierFor(conf.data, r.kind, r.kind === "td" ? r.chance : Math.max(r.chance, 1 - r.chance))} compact /></div>
-            </li>))}</ul>)}
-      {feed.at && <div className="border-t border-line px-4 py-2 text-[11px] text-muted sm:px-5">"vs" is the chance the price implies, which includes the book's margin. A gap is not a sure thing.</div>}
-    </Card>
-  );
-}
-// Our chance must beat the best price by this much before a leg is shown: covers the book margin and model error.
-const MIN_EDGE = 0.03;
-const dec = (american: number) => 1 + (american > 0 ? american / 100 : 100 / -american);
 
 /** Last week's picks, graded: the Top 3 and how each confidence tier did. */
 function LastWeekCard({ season, week, suffix }: { season: number; week: number; suffix: string }) {
@@ -294,7 +208,6 @@ function TrackRecordCard({ p, loading, suffix }: { p: Overview["model_performanc
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-xs text-muted">{p.top3.hits} of {p.top3.graded} top-3 picks scored across {p.top3_policy.weeks} test weeks (95% CI {pct(p.top3.ci[0])}–{pct(p.top3.ci[1])}). Model: {p.model}.</p>
           </>
         )}
       </CardBody>

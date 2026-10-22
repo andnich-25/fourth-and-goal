@@ -112,6 +112,8 @@ function ScoreGuide() {
 type SortKey = "chance" | "hits" | "projection" | "name";
 const SORT_NOTE: Record<SortKey, string> = { chance: "best hit chance first", hits: "best recent hit rate at the line first (last 8)", projection: "highest projection first", name: "A to Z" };
 
+const lc = (x: string) => x.toLowerCase();
+
 export default function PropsPage() {
   const { season, week } = useSeasonWeek();
   const suffix = useLinkSuffix();
@@ -180,8 +182,15 @@ export default function PropsPage() {
         </Select>
       </PageTitle>
 
-      {m && <MarketCard m={m} />}
-      {m?.validated && <ScoreGuide />}
+      {m && (
+        <details className="card group">
+          <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm sm:px-5">
+            <span><span className="font-medium">How to read this page</span><span className="text-muted"> · how accurate {lc(m.label)} picks have been</span></span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="space-y-4 border-t border-line p-3 sm:p-4"><MarketCard m={m} />{m.validated && <ScoreGuide />}</div>
+        </details>
+      )}
 
       {q.isError && <Card><ErrorState error={q.error} onRetry={() => q.refetch()} /></Card>}
       {q.isLoading && <Card><LoadingBlock rows={6} className="p-5" /></Card>}
