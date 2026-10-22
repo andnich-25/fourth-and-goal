@@ -11,9 +11,9 @@ import { PageTitle } from "@/components/Layout";
 import { Badge, Card, CardBody, ErrorState, Input, LoadingBlock, PosBadge, Segmented, Select, TableWrap, Td, TeamBadge, Th } from "@/components/ui";
 import { Flags, NoDataState, TierBadge } from "@/components/shared";
 import { useConfidence, tierFor } from "@/lib/confidence";
-import { overReasons, underReasons, usualLine, type Recent } from "@/lib/ask";
+import { overReasons, PLAYABLE_NOTE, underReasons, usualLine, type Recent } from "@/lib/ask";
 import { likelyToPlay, starterQbs } from "@/lib/playing";
-import { ladder } from "@/lib/hitrates";
+import { ladder, playable, type Playable } from "@/lib/hitrates";
 
 export type MarketMeta = {
   market: string; label: string; positions: string[]; kind: string; validated: boolean; model: string | null; tested: boolean;
@@ -239,7 +239,7 @@ export default function PropsPage() {
                                 : <p className="mt-1 text-sm text-muted">No single factor stands out; the lean comes from the model weighing everything below together.</p>}
                             </div>
                           )}
-                          {r.dist && <LineLadder r={r} line={line} />}
+                          {r.dist && <LineLadder r={r} line={line} pl={playable(feed, market, r)} />}
                           <div className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-4">
                             {Object.entries(r.evidence).map(([ek, v]) => (
                               <div key={ek} className="flex justify-between gap-3"><span className="text-muted">{evidenceLabel(ek, stat, m?.label ?? "")}</span><span className="font-medium">{evidenceValue(ek, v)}</span></div>
@@ -265,9 +265,9 @@ export default function PropsPage() {
 }
 
 /** Every line for one player: this week's chance and how often he cleared it recently. */
-function LineLadder({ r, line }: { r: PropRow; line: number }) {
+function LineLadder({ r, line, pl }: { r: PropRow; line: number; pl: Playable }) {
   const [win, setWin] = React.useState(8);
-  const rungs = ladder(r, win);
+  const rungs = ladder(r, win, pl);
   if (!rungs.length) return null;
   const tone = (x: number) => (x >= 0.8 ? "text-accent font-semibold" : x <= 0.2 ? "text-danger" : "");
   return (
@@ -291,7 +291,8 @@ function LineLadder({ r, line }: { r: PropRow; line: number }) {
               </tr>);
           })}</tbody></table>
       </div>
-      <p className="mt-1 text-xs text-muted">Hit rates count games he played. The model's chance is this week's forecast and also weighs the matchup, role and game script.</p>
+      <p className="mt-1 text-xs text-muted">{pl.source === "book" ? "These are the lines the books post, alternate lines included." : PLAYABLE_NOTE}{" "}
+        Hit rates count games he played. The model's chance is this week's forecast and also weighs the matchup, role and game script.</p>
     </div>
   );
 }

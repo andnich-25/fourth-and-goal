@@ -133,7 +133,17 @@ describe("ask parser", () => {
     const b = answer(dd, "what props hit 60% of the time");
     expect(b.picks?.[0].label).toBe("Over 6.5 receptions");
     const l = answer(dd, "St. Brown alt lines receptions");
-    expect(l.table?.rows.some((r) => String(r[0]) === "5.5" && String(r[3]).startsWith("8 of 8"))).toBe(true);
+    expect(l.table?.rows.some((r) => String(r[0]) === "5.5" && String(r[3]).startsWith("8 of 8"))).toBe(true);    // Only lines a book would offer: a QB with one 54-yard game has no 100% passing-yards line, never "over 50.5".
+    const qrec = [281, 329, 291, 287, 361, 266, 54, 191].map((v, i) => ({ season: 2026, week: 6 - i, opponent: "TB", value: v }));
+    const qb = { player_id: "9", player_name: "Bryce Young", team: "CAR", opponent: "TB", position: "QB", game_id: "2026_07_TB_CAR", eligible: 1,
+      median: 241, q10: 147, q90: 327, recent: qrec, evidence: { pass_yards_med: 284, attempts_pg: 33, snap_pct: 1 },
+      dist: { type: "quantiles" as const, q: Array.from({ length: 99 }, (_, i) => 120 + i * 2.4), platt: [1, 0] as [number, number] } };
+    const qd: AskData = { ...d, props: { pass_yards: { label: "Passing yards", rows: [qb] } } };
+    expect(answer(qd, "What props have a 100% hit rate?").picks ?? []).toHaveLength(0);
+    const q90 = answer(qd, "what props have a 80% hit rate");
+    expect(q90.picks?.[0].line).toBeGreaterThanOrEqual(169);
+    const lad = answer(qd, "Bryce Young passing yards alt lines");
+    expect(lad.table?.rows.every((r) => parseFloat(String(r[0])) >= 168)).toBe(true);
   });
 
   it("flags due players from expected vs actual TDs", () => {

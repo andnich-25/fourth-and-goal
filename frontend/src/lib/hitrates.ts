@@ -1,5 +1,6 @@
 /* Hit rates at every line: for each player and market, how often he cleared each line in his recent games, next to
    the model's chance for this week. Past hit rates describe what happened; the model's chance is the forecast. */
+import { feedLine, type Feed } from "@/lib/feed";
 import { pOver, type PropDist } from "@/lib/props";
 
 export type Recent = { season: number; week: number; opponent: string; value: number };
@@ -14,19 +15,33 @@ export function stepFor(scale: number) {
   return scale <= 30 ? 1 : scale <= 80 ? 5 : 10;
 }
 
-/** Lines from below his worst recent game to above his best, each with the model chance and recent hit counts. */
-export function ladder(r: HitRow, window = 8): Rung[] {
-  const rec = (r.recent ?? []).slice(0, window);
-  const vals = [...rec.map((g) => g.value), r.q10, r.q90, r.median];
-  const hi = Math.max(...vals), lo = Math.min(...vals);
-  const step = stepFor(hi);
-  const start = Math.max(0.5, Math.floor(lo / step) * step - (step === 1 ? 0.5 : step / 2) + (step === 1 ? 0 : 0));
-  const out: Rung[] = [];
-  for (let line = step === 1 ? Math.floor(start) + 0.5 : Math.floor(start / step) * step + 0.5; line <= hi + step && out.length < 30; line += step) {
-    if (line < 0.5) continue;
-    out.push(rung(r, line, window));
+/** The lines a sportsbook would actually let you bet. With alternate lines loaded, exactly the lines the books post.
+ *  Otherwise an estimated band around the main book line (or, before lines load, the projection): books stop posting
+ *  alternate lines once the price runs past roughly -1000, which lands about 30% either side of the main line
+ *  (e.g. 180 passing yards against a 240 main line). Lines like over 50.5 passing yards are never offered. */
+export type Playable = { lines: number[] | null; anchor: number; source: "book" | "estimated" };
+export function playable(feed: Feed | undefined, market: string, r: HitRow): Playable {
+  const main = feed ? feedLine(feed, market, r.player_id) : null;
+  if (feed && feed.get(market, r.player_id, "over").some((o) => o.alt)) {
+    const lines = new Set<number>();
+    for (const side of ["over", "under"]) for (const o of feed.get(market, r.player_id, side)) if (o.line != null) lines.add(o.line);
+    return { lines: [...lines].sort((a, b) => a - b), anchor: main ?? Math.floor(r.median) + 0.5, source: "book" };
   }
-  return out;
+  return { lines: null, anchor: main ?? Math.floor(r.median) + 0.5, source: "estimated" };
+}
+export function band(anchor: number): [number, number] {
+  const w = Math.max(anchor <= 30 ? 2 : 0, 0.3 * anchor);
+  return [Math.max(0.5, anchor - w), anchor + w];
+}
+
+/** Every playable line, each with the model chance and recent hit counts. */
+export function ladder(r: HitRow, window = 8, pl: Playable = playable(undefined, "", r)): Rung[] {
+  if (pl.lines) return pl.lines.map((line) => rung(r, line, window));
+  const [lo, hi] = band(pl.anchor);
+  const step = stepFor(hi);
+  const lines = new Set<number>([pl.anchor]);
+  for (let line = Math.ceil((lo - 0.5) / step) * step + 0.5; line <= hi && lines.size < 30; line += step) if (line >= 0.5) lines.add(line);
+  return [...lines].sort((a, b) => a - b).map((line) => rung(r, line, window));
 }
 
 export function rung(r: HitRow, line: number, window = 8): Rung {
@@ -37,11 +52,12 @@ export function rung(r: HitRow, line: number, window = 8): Rung {
 }
 
 /** The line where his recent hit rate on a side first reaches the threshold: the highest such line for overs, the
- *  lowest for unders. null if he has fewer than minGames recent games or never reaches it inside his range. */
-export function lineAtRate(r: HitRow, side: "over" | "under", threshold: number, window = 8, minGames = 5): Rung | null {
+ *  lowest for unders, among playable lines only. null if he has fewer than minGames recent games or no playable line reaches it. */
+export function lineAtRate(r: HitRow, side: "over" | "under", threshold: number, window = 8, minGames = 5,
+  pl: Playable = playable(undefined, "", r)): Rung | null {
   const rec = (r.recent ?? []).slice(0, window);
   if (rec.length < minGames) return null;
-  const rungs = ladder(r, window);
+  const rungs = ladder(r, window, pl);
   const ok = (x: Rung) => (side === "over" ? x.hits : x.games - x.hits) / x.games >= threshold - 1e-9;
   const cands = rungs.filter(ok);
   if (!cands.length) return null;

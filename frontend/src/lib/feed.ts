@@ -3,7 +3,7 @@ import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
-export type OddsRow = { market: string; player_id: string; book: string; side: string; line: number | null; price: number };
+export type OddsRow = { market: string; player_id: string; book: string; side: string; line: number | null; price: number; alt?: boolean };
 export type OddsResp = { fetched_at: string | null; source?: string; rows: OddsRow[]; empty_reason?: string };
 export type Feed = { at: string | null; get: (market: string, playerId: string, side: string) => OddsRow[] };
 
@@ -18,10 +18,10 @@ export function useFeed(season: number, week: number): Feed {
     return { at: q.data?.fetched_at ?? null, get: (m, p, s) => idx.get(`${m}:${p}:${s}`) ?? [] };
   }, [q.data]);
 }
-/** Most common line the books offer (the one prices can be compared at). */
+/** Most common main line the books offer (the one prices can be compared at); alternate lines are left out. */
 export function feedLine(feed: Feed, market: string, playerId: string): number | null {
   const n = new Map<number, number>();
-  for (const r of feed.get(market, playerId, "over")) if (r.line != null) n.set(r.line, (n.get(r.line) ?? 0) + 1);
+  for (const r of feed.get(market, playerId, "over")) if (r.line != null && !r.alt) n.set(r.line, (n.get(r.line) ?? 0) + 1);
   let best: number | null = null, c = 0;
   n.forEach((v, k) => { if (v > c) { best = k; c = v; } });
   return best;
