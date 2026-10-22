@@ -24,6 +24,7 @@ export default function NbaProps() {
   const [lines, setLines] = React.useState<Record<string, string>>(loadLines);
   React.useEffect(() => { try { localStorage.setItem(LINES_KEY, JSON.stringify(lines)); } catch { /* storage unavailable */ } }, [lines]);
   const slate = useNba<Slate>("slate.json");
+  const priced = !!slate.data?.odds.props_priced;
   const markets = useNba<{ markets: MarketReport[] }>("markets.json");
   const conf = useNba<NbaConfidence>("confidence.json");
   const m = markets.data?.markets.find((x) => x.market === market);
@@ -83,14 +84,15 @@ export default function NbaProps() {
             <table className="w-full">
               <thead><tr>
                 <Th>Player</Th><Th>Opp</Th><Th className="text-right">Proj</Th><Th className="text-right" title="80% of outcomes should land here">Range</Th>
-                <Th>Line</Th><Th title="Under and over out of 10; they add to 10">Under · Over</Th><Th>Lean</Th><Th>Best price</Th><Th />
+                <Th title={priced ? "Book line; type any line to rescore" : "His usual line (median of his last 10 games); type any line to rescore"}>Line</Th>
+                <Th title="Under and over out of 10; they add to 10">Under · Over</Th><Th>Lean</Th>{priced && <Th>Best price</Th>}<Th />
               </tr></thead>
               <tbody>
                 {view.map(({ r, typed, line, lean, edge, offer, tier }) => (
                   <React.Fragment key={r.player_id}>
                     <tr className={cn("border-b border-line/60 hover:bg-raised/50", r.out && "opacity-50")}>
-                      <Td>
-                        <div className="flex min-w-[180px] items-center gap-2">
+                      <Td className="w-[1%]">
+                        <div className="flex w-[220px] items-center gap-2">
                           <Headshot src={r.headshot} name={r.player_name} />
                           <TeamBadge team={r.team} />
                           <div className="min-w-0">
@@ -98,7 +100,8 @@ export default function NbaProps() {
                               <Link to={`/nba/players/${r.player_id}`} className="truncate font-medium hover:text-accent">{r.player_name}</Link>
                               <NbaSignals edge={edge} due={r.due} />
                             </div>
-                            {r.injury && <span className={cn("text-[11px]", r.out ? "text-danger" : "text-warn")}>{r.injury}{r.injury_note ? ` · ${r.injury_note}` : ""}</span>}
+                            {/* the full injury note is in the row's details; here it stays on one line so the column keeps its width */}
+                            {r.injury && <div title={r.injury_note ?? undefined} className={cn("truncate text-[11px]", r.out ? "text-danger" : "text-warn")}>{r.injury}{r.injury_note ? ` · ${r.injury_note}` : ""}</div>}
                           </div>
                         </div>
                       </Td>
@@ -108,16 +111,16 @@ export default function NbaProps() {
                       <Td>
                         <Input aria-label={`Line for ${r.player_name}`} inputMode="decimal" placeholder={String(r.line)} value={typed ?? ""}
                           onChange={(e) => setLines({ ...lines, [key(r)]: e.target.value })} className="h-8 w-20" />
-                        {!typed && <div className="mt-0.5 text-[10px] text-muted">{r.line_source === "book" ? "book line" : "usual line"}</div>}
                       </Td>
                       <Td>{lean ? <ScoreSplit over={lean.over} /> : <span className="text-xs text-muted">hidden</span>}</Td>
                       <Td>{lean ? <div className="flex items-center gap-1.5 whitespace-nowrap"><span className="font-semibold">{lean.side === "under" ? "Under" : "Over"} {line}</span>{!r.out && <TierBadge tier={tier} compact />}</div> : <span className="text-muted">—</span>}</Td>
-                      <Td className="whitespace-nowrap">{offer ? <span>{fmtPrice(offer.price)} <span className="text-xs text-muted">{bookName(offer.book)}</span></span> : <span className="text-muted">—</span>}</Td>
+                      {priced && <Td className="whitespace-nowrap">{offer ? <span>{fmtPrice(offer.price)} <span className="text-xs text-muted">{bookName(offer.book)}</span></span> : <span className="text-muted">—</span>}</Td>}
                       <Td><button aria-expanded={open === r.player_id} aria-label="Show why" onClick={() => setOpen(open === r.player_id ? null : r.player_id)} className="rounded p-1 text-muted hover:bg-raised">
                         <ChevronDown className={cn("h-4 w-4 transition", open === r.player_id && "rotate-180")} /></button></Td>
                     </tr>
                     {open === r.player_id && (
-                      <tr className="border-b border-line bg-raised/30"><td colSpan={9} className="px-4 py-3 text-sm">
+                      <tr className="border-b border-line bg-raised/30"><td colSpan={priced ? 9 : 8} className="whitespace-normal px-4 py-3 text-sm">
+                        {r.injury && <p className={cn("mb-2", r.out ? "text-danger" : "text-warn")}>{r.injury}{r.injury_note ? `: ${r.injury_note}` : ""}</p>}
                         {lean && (<>
                           <div className="font-semibold">Why it leans {lean.side} {line}</div>
                           <ul className="mt-1 list-disc space-y-0.5 pl-5 text-muted">{nbaReasons({ ...r, line }, lean).map((t) => <li key={t}>{t}</li>)}</ul>

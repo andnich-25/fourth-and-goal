@@ -74,3 +74,17 @@ def test_free_plan_takes_game_lines_only(arch, monkeypatch):
 def test_no_key_skips(arch, monkeypatch):
     monkeypatch.delenv("ODDS_API_KEY")
     assert collect.save_odds("2026-10-22", log=lambda m: None) == {"skipped": "no key"}
+
+
+def test_rosters_saved_by_team_and_read_back_by_athlete_id(arch, monkeypatch):
+    from nba import predict
+
+    def fake(url, params=None):
+        team = url.rsplit("/teams/", 1)[1].split("/")[0].upper()
+        if team == "PHI":
+            raise RuntimeError("timeout")
+        return {"athletes": [{"id": "3149673" if team == "CLE" else str(hash(team) % 10**6), "displayName": "x"}]}, {}
+    monkeypatch.setattr(collect, "_get_json", fake)
+    st = collect.save_rosters("2026-10-22", log=lambda *_: None)
+    assert st["teams"] == 29 and set(st["errors"]) == {"PHI"}
+    assert predict.rosters()[3149673] == "CLE"

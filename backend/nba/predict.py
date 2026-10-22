@@ -1,7 +1,9 @@
 """Projections for the next slate of NBA games.
 
 Who is projected: everyone who played for the team in its last 15 games this season (or, before a team has played,
-in last season's final 15), minus players the latest injury report lists as Out. Each market's model is fit on every
+in last season's final 15), minus players the latest injury report lists as Out. When today's ESPN rosters are saved,
+they decide the team: a player who moved in the offseason is projected for his new team before he has played for it,
+and a player no longer on the roster is dropped. Each market's model is fit on every
 game before the slate with the same recency weights as the walk-forward, and the dispersion and over/under
 calibration come from the walk-forward's most recent 12 months of out-of-sample predictions.
 """
@@ -13,7 +15,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats as st
 
-from . import history, props, sources
+from . import history, props, sources, teamfit
 
 OUT_STATUSES = {"out", "injured reserve", "suspended", "out for season"}
 
@@ -47,24 +49,40 @@ def injuries() -> dict[str, dict]:
     return out
 
 
+def rosters() -> dict[int, str]:
+    """ESPN athlete id -> team abbreviation from the newest saved rosters ({} when none are saved)."""
+    files = sorted((sources.archive_dir() / "rosters").glob("*.json"))
+    if not files:
+        return {}
+    teams = json.loads(files[-1].read_text()).get("teams", {})
+    return {int(a["id"]): team for team, players in teams.items() for a in players if str(a.get("id", "")).isdigit()}
+
+
 def _norm(s: str) -> str:
     import re  # noqa: PLC0415
     s = re.sub(r"[^a-z ]", "", s.lower().replace("-", " ").replace(".", ""))
     return " ".join(w for w in s.split() if w not in {"jr", "sr", "ii", "iii", "iv"})
 
 
-def slate_rows(d: pd.DataFrame, slate: pd.DataFrame, season: int) -> pd.DataFrame:
+def slate_rows(d: pd.DataFrame, slate: pd.DataFrame, season: int, roster: dict[int, str] | None = None) -> pd.DataFrame:
     played = d[d.played]
+    roster = rosters() if roster is None else roster
+    last_team = played.sort_values("game_date").groupby("player_id").team.last()
+    # enough history to project: played this season or last
+    active = set(played.loc[played.season >= season - 1, "player_id"])
     rows = []
     for g in slate.itertuples():
         for team, opp, home in ((g.home_abbreviation, g.away_abbreviation, 1), (g.away_abbreviation, g.home_abbreviation, 0)):
-            tg = played[played.team == team]
-            cur = tg[tg.season == season]
-            src = cur if cur.game_id.nunique() >= 1 else tg[tg.season == season - 1]
-            recent = src[src.game_id.isin(src.drop_duplicates("game_id").nlargest(15, "game_date").game_id)]
-            # a player who has since played for another team is not on this roster any more
-            last_team = played.sort_values("game_date").groupby("player_id").team.last()
-            ids = [pid for pid in recent.player_id.unique() if last_team.get(pid) == team]
+            if roster and team in set(roster.values()):
+                # today's roster decides; players new to the team bring their history from their old team
+                ids = [pid for pid in active if roster.get(int(pid)) == team]
+            else:
+                tg = played[played.team == team]
+                cur = tg[tg.season == season]
+                src = cur if cur.game_id.nunique() >= 1 else tg[tg.season == season - 1]
+                recent = src[src.game_id.isin(src.drop_duplicates("game_id").nlargest(15, "game_date").game_id)]
+                # a player who has since played for another team is not on this roster any more
+                ids = [pid for pid in recent.player_id.unique() if last_team.get(pid) == team]
             info = played[played.player_id.isin(ids)].sort_values("game_date").groupby("player_id").last()
             for pid in ids:
                 r = info.loc[pid]
@@ -74,8 +92,10 @@ def slate_rows(d: pd.DataFrame, slate: pd.DataFrame, season: int) -> pd.DataFram
     return pd.DataFrame(rows)
 
 
-def project(d: pd.DataFrame, slate: pd.DataFrame, calib: dict, season: int = sources.CURRENT_SEASON, log=print) -> pd.DataFrame:
-    """One row per player and market with mean, distribution and the usual line."""
+def project(d: pd.DataFrame, slate: pd.DataFrame, calib: dict, season: int = sources.CURRENT_SEASON, log=print,
+            team_fit: dict | None = None) -> pd.DataFrame:
+    """One row per player and market with mean, distribution and the usual line. `team_fit` (nba.teamfit) scales
+    each team's points so its rotation adds up to what such teams actually score."""
     up = slate_rows(d, slate, season)
     if up.empty:
         return pd.DataFrame()
@@ -110,4 +130,4 @@ def project(d: pd.DataFrame, slate: pd.DataFrame, calib: dict, season: int = sou
     meta = up.set_index("player_id")[["headshot", "injury", "injury_note", "game_time", "home"]]
     res = res.join(meta, on="player_id", rsuffix="_up")
     res["out"] = res.injury.str.lower().isin(OUT_STATUSES)
-    return res
+    return teamfit.apply(res, team_fit or {}, log=log)

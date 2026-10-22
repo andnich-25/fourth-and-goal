@@ -45,7 +45,9 @@ export type NbaRecord = { days: number; picks: number; empty_reason?: string; fi
   vs_books?: { picks: number; wins: number; units: number; roi: number | null } };
 export type NbaStatus = { generated_at: string; season_label: string; slate_date: string | null; slate_games: number; projected_players: number;
   validated_markets: string[]; recency_half_life_seasons: number; injuries_as_of?: string | null;
+  team_check?: { use: boolean; test_seasons?: number[]; plain?: TeamCheckScore; adjusted?: TeamCheckScore };
   history: { first_season: number; games: number; player_games: number; last_game_date: string } };
+export type TeamCheckScore = { lean_hit: number; strong_hit: number; strong_n: number; avg_miss: number };
 export type GameLog = { date: string; opp: string; home: number; minutes: number; starter: number; points: number; rebounds: number; assists: number; threes: number; pra: number };
 export type PlayerPage = { player_id: string; player_name: string; team: string; pos: string; headshot?: string; log: GameLog[]; props: NbaRow[] };
 

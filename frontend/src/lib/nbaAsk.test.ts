@@ -15,13 +15,22 @@ const row = (id: string, name: string, team: string, game: number, market: strin
   due: false, evidence: { minutes: 34, minutes_long: 34, per_min: 0.7, opp_mult: 1, pace: 100, opp_pace: 100, rest: 2, start_rate: 1 }, ...extra,
 });
 const slate: Slate = {
-  date: "2026-10-22", generated_at: "", games: [], odds: { fetched_at: null, plan: "free", props_priced: false },
+  date: "2026-10-22", generated_at: "", odds: { fetched_at: null, plan: "free", props_priced: false },
+  games: [
+    { game_id: 1, home: "NY", away: "BOS", time: "2026-10-22T23:30:00Z", total: 221.5, home_spread: -3.5 } as Slate["games"][number],
+    { game_id: 2, home: "LAL", away: "OKC", time: "2026-10-23T02:00:00Z", total: 224.5, home_spread: 4.5 } as Slate["games"][number],
+  ],
   rows: [
     row("1", "Jalen Brunson", "NY", 1, "points", 27, 22.5),
     row("2", "Jayson Tatum", "BOS", 1, "points", 26, 30.5),
     row("3", "Luka Doncic", "LAL", 2, "points", 30, 29.5, { due: true }),
     row("1", "Jalen Brunson", "NY", 1, "assists", 7, 6.5),
-    row("4", "Hurt Guy", "NY", 1, "points", 20, 19.5, { out: true }),
+    row("1", "Jalen Brunson", "NY", 1, "threes", 0.3, 0.5),
+    row("4", "Hurt Guy", "NY", 1, "points", 20, 19.5, { out: true, injury: "Out" }),
+    row("5", "Jaylen Brown", "BOS", 1, "points", 22, 25.5),
+    row("6", "Bruce Brown", "NY", 1, "points", 8, 10.5),
+    row("7", "Shai Gilgeous-Alexander", "OKC", 2, "points", 31, 30.5),
+    row("7", "Shai Gilgeous-Alexander", "OKC", 2, "rebounds", 5, 6.5),
   ],
 };
 
@@ -32,14 +41,40 @@ describe("nba ask", () => {
     expect(a.items[0].line).toBe(24.5);
     expect(a.items[0].p).toBeGreaterThan(0.5);
   });
-  it("builds a parlay with one leg per game and never uses Out players", () => {
-    const a = answer("3-leg parlay", slate);
-    expect(new Set(a.items.map((x) => x.row.game_id)).size).toBe(a.items.length);
-    expect(a.items.some((x) => x.row.out)).toBe(false);
-    expect(a.parlay?.joint).toBeGreaterThan(0);
+  it("builds a parlay one leg per game, and adds legs from the same games when asked for more legs than games", () => {
+    const two = answer("2-leg parlay", slate);
+    expect(new Set(two.items.map((x) => x.row.game_id)).size).toBe(2);
+    const four = answer("4-leg parlay", slate);
+    expect(four.items).toHaveLength(4);
+    expect(new Set(four.items.map((x) => x.row.player_id)).size).toBe(4);
+    expect(four.items.some((x) => x.row.out)).toBe(false);
+    expect(four.parlay?.joint).toBeGreaterThan(0);
+    expect(answer("same game parlay", slate).items.length).toBeGreaterThanOrEqual(2);
   });
   it("filters unders and due players", () => {
     expect(answer("best unders", slate).items.every((x) => x.side === "under")).toBe(true);
     expect(answer("who is due?", slate).items.map((x) => x.row.player_id)).toEqual(["3"]);
+  });
+  it("knows nicknames, shared last names and players who aren't playing", () => {
+    expect(answer("sga props", slate).title).toContain("Shai Gilgeous-Alexander");
+    const browns = answer("brown points", slate);
+    expect(browns.title).toContain("2 players named Brown");
+    expect(browns.suggestions).toEqual(["Jaylen Brown points", "Bruce Brown points"]);
+    expect(answer("will lebron score 25", slate).title).toBe("Lebron isn't on tonight's slate");
+  });
+  it("explains the side that was asked about and skips lines under 1.5", () => {
+    const why = answer("why is tatum under", slate);
+    expect(why.items[0].side).toBe("under");
+    expect(why.bullets?.length).toBeGreaterThan(1);
+    expect(answer("brunson props", slate).items.some((x) => x.row.market === "threes")).toBe(false);
+    expect(answer("brunson last 3 games", slate).title).toBe("Jalen Brunson: last 3 games");
+  });
+  it("never leaves a question blank", () => {
+    for (const q of ["", "asdfgh", "hello", "injuries", "schedule", "okc vs lakers preview", "who is hot", "edges", "best 3 picks", "most rebounds",
+      "under 6.5 rebounds", "who gets 30 points", "how accurate is the model", "triple double", "minutes", "knicks props"]) {
+      const a = answer(q, slate);
+      expect(a.title.length, q).toBeGreaterThan(0);
+      expect(a.items.length + (a.bullets?.length ?? 0) + (a.text ? 1 : 0), q).toBeGreaterThan(0);
+    }
   });
 });
