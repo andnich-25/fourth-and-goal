@@ -109,12 +109,16 @@ function ScoreGuide() {
   );
 }
 
+type SortKey = "chance" | "hits" | "projection" | "name";
+const SORT_NOTE: Record<SortKey, string> = { chance: "best hit chance first", hits: "best recent hit rate at the line first (last 8)", projection: "highest projection first", name: "A to Z" };
+
 export default function PropsPage() {
   const { season, week } = useSeasonWeek();
   const suffix = useLinkSuffix();
   const [market, setMarket] = React.useState("receptions");
   const [search, setSearch] = React.useState("");
   const [show, setShow] = React.useState<Show>("all");
+  const [sort, setSort] = React.useState<SortKey>("chance");
   const [open, setOpen] = React.useState<string | null>(null);
   const [lines, setLines] = React.useState<Lines>(loadLines);
   React.useEffect(() => { try { localStorage.setItem(LINES_KEY, JSON.stringify(lines)); } catch { /* ignore */ } }, [lines]);
@@ -149,9 +153,15 @@ export default function PropsPage() {
     const edge = leanP != null && implied != null ? leanP - implied : null;
     const label = m?.label ?? market;
     const reasons = lean && Number.isFinite(line) ? (lean === "under" ? underReasons : overReasons)(r, market, label, line) : [];
-    return { r, typed, line, source, over, lean, leanP, odds, edge, reasons, tier: tierFor(conf.data, "props", leanP) };
+    const rec = (r.recent ?? []).slice(0, 8);
+    const hitRate = lean && rec.length ? rec.filter((g) => (lean === "over" ? g.value > line : g.value < line)).length / rec.length : -1;
+    return { r, typed, line, source, over, lean, leanP, odds, edge, reasons, hitRate, tier: tierFor(conf.data, "props", leanP) };
   }).filter((v) => show === "all" || v.lean === show)
-    .sort((a, b) => Number(!!b.r.eligible) - Number(!!a.r.eligible) || (b.leanP ?? -1) - (a.leanP ?? -1) || b.r.median - a.r.median);
+    .sort((a, b) => Number(!!b.r.eligible) - Number(!!a.r.eligible) || (
+      sort === "hits" ? b.hitRate - a.hitRate || (b.leanP ?? -1) - (a.leanP ?? -1)
+        : sort === "projection" ? b.r.median - a.r.median
+          : sort === "name" ? a.r.player_name.localeCompare(b.r.player_name)
+            : (b.leanP ?? -1) - (a.leanP ?? -1) || b.r.median - a.r.median));
   const hasActual = d?.rows.some((x) => x.actual != null);
 
   return (
@@ -184,7 +194,10 @@ export default function PropsPage() {
             </div>
             {m?.validated && <Segmented size="sm" label="Show" value={show} onChange={setShow}
               options={[{ value: "all", label: "All" }, { value: "under", label: "Leaning under" }, { value: "over", label: "Leaning over" }]} />}
-            <span className="text-sm text-muted">{view.length} players · {m?.validated ? "strongest lean first" : "research projections only"}{hidden ? ` · ${hidden} backups and inactive players hidden (search a name to see one)` : ""}</span>
+            <Select aria-label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="h-8 w-44 text-xs">
+              <option value="chance">Sort: best hit chance</option><option value="hits">Sort: recent hit rate</option>
+              <option value="projection">Sort: projection</option><option value="name">Sort: name</option></Select>
+            <span className="text-sm text-muted">{view.length} players · {m?.validated ? SORT_NOTE[sort] : "research projections only"}{hidden ? ` · ${hidden} backups and inactive players hidden (search a name to see one)` : ""}</span>
           </div>
           <TableWrap>
             <table className="w-full">
@@ -265,7 +278,7 @@ export default function PropsPage() {
 }
 
 /** Every line for one player: this week's chance and how often he cleared it recently. */
-function LineLadder({ r, line, pl }: { r: PropRow; line: number; pl: Playable }) {
+export function LineLadder({ r, line, pl }: { r: PropRow; line: number; pl: Playable }) {
   const [win, setWin] = React.useState(8);
   const rungs = ladder(r, win, pl);
   if (!rungs.length) return null;
