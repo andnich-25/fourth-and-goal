@@ -55,6 +55,30 @@ html.dark[data-sport="nba"] {
   --accent-fg: 12 13 28;
   --info: 140 160 255;
 }
+/* College football: its own palette too (crimson and old gold on cream; gold on deep crimson-navy in dark mode),
+   set by Layout on <html data-sport="cfb">. */
+html[data-sport="cfb"] {
+  --bg: 250 247 241;
+  --surface: 255 255 255;
+  --raised: 244 238 228;
+  --line: 229 220 205;
+  --fg: 33 17 20;
+  --muted: 112 94 92;
+  --accent: 158 27 50;
+  --accent-fg: 255 255 255;
+  --info: 140 102 22;
+}
+html.dark[data-sport="cfb"] {
+  --bg: 20 11 16;
+  --surface: 34 19 26;
+  --raised: 46 27 35;
+  --line: 66 41 50;
+  --fg: 248 242 236;
+  --muted: 182 160 160;
+  --accent: 236 186 76;
+  --accent-fg: 20 11 16;
+  --info: 236 186 76;
+}
 
 @layer base {
   html, body, #root { height: 100%; }
