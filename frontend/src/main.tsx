@@ -19,6 +19,13 @@ import Trends from "./pages/Trends";
 import Builder from "./pages/Builder";
 import Ask from "./pages/Ask";
 import How from "./pages/How";
+import NbaHome from "./pages/nba/NbaHome";
+import NbaProps from "./pages/nba/NbaProps";
+import NbaBuilder from "./pages/nba/NbaBuilder";
+import NbaAsk from "./pages/nba/NbaAsk";
+import NbaPlayer from "./pages/nba/NbaPlayer";
+import NbaRecord from "./pages/nba/NbaRecord";
+import NbaHow from "./pages/nba/NbaHow";
 import HitRates from "./pages/HitRates";
 import { EmptyState } from "./components/ui";
 import { STATIC } from "./lib/api";
@@ -52,6 +59,13 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Route path="backtest" element={<Backtest />} />
               <Route path="data" element={<DataSync />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="nba" element={<NbaHome />} />
+              <Route path="nba/props" element={<NbaProps />} />
+              <Route path="nba/builder" element={<NbaBuilder />} />
+              <Route path="nba/ask" element={<NbaAsk />} />
+              <Route path="nba/players/:id" element={<NbaPlayer />} />
+              <Route path="nba/record" element={<NbaRecord />} />
+              <Route path="nba/how" element={<NbaHow />} />
               <Route path="*" element={<EmptyState title="Page not found">That route does not exist.</EmptyState>} />
             </Route>
           </Routes>

@@ -32,6 +32,29 @@
   --ok: 110 214 150;
   color-scheme: dark;
 }
+/* NBA: the basketball side of the site gets its own palette (hardwood orange on navy), set by Layout on <html data-sport="nba">. */
+html[data-sport="nba"] {
+  --bg: 248 245 241;
+  --surface: 255 255 255;
+  --raised: 243 237 230;
+  --line: 230 221 211;
+  --fg: 22 20 38;
+  --muted: 105 98 112;
+  --accent: 196 72 10;
+  --accent-fg: 255 255 255;
+  --info: 61 84 200;
+}
+html.dark[data-sport="nba"] {
+  --bg: 12 13 28;
+  --surface: 22 24 46;
+  --raised: 31 33 60;
+  --line: 44 47 80;
+  --fg: 245 244 250;
+  --muted: 156 156 184;
+  --accent: 255 140 56;
+  --accent-fg: 12 13 28;
+  --info: 140 160 255;
+}
 
 @layer base {
   html, body, #root { height: 100%; }
