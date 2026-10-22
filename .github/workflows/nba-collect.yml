@@ -7,9 +7,6 @@ on:
   schedule:
     - cron: "0 16 * * *"   # every day 16:00 UTC (noon ET in summer time, 11:00 ET in winter), before tip-off
   workflow_dispatch:
-  push:
-    branches: [claude/project-thread-rzwyut]
-    paths: [".github/workflows/nba-collect.yml", "backend/nba/**"]
 
 permissions:
   contents: write
