@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { cn, num, pct } from "@/lib/format";
 import { useConfidence } from "@/lib/confidence";
 import { useFeed } from "@/lib/feed";
-import { answer, EXAMPLES, fmtPrice, gameLabel, american, type Answer, type AskData, type Pick, type PropRow } from "@/lib/ask";
+import { answer, EXAMPLES, fmtPrice, slipLeg, gameLabel, american, type Answer, type AskData, type Pick, type PropRow } from "@/lib/ask";
 import { loadKey, MODEL, saveKey } from "@/lib/aiKey";
 import type { AiTurn } from "@/lib/askAi";
 import type { Buckets } from "@/lib/sim";
@@ -238,13 +238,6 @@ export function PickList({ picks, suffix }: { picks: Pick[]; suffix: string }) {
       ))}
     </ul>
   );
-}
-
-function slipLeg(d: AskData, p: Pick) {
-  const prices: Record<string, string> = {};
-  for (const r of d.feed.get(p.market, p.player_id, p.side)) if (p.market === "td" || r.line === p.line) prices[r.book] = fmtPrice(r.price);
-  return { id: p.id, market: p.market, player_id: p.player_id, team: p.team, position: p.pos, game_id: p.game_id, p: p.p, side: p.side, name: p.name,
-    opponent: p.opp, label: p.market === "td" ? "Anytime TD" : d.props[p.market]?.label ?? p.market, line: p.line, dist: p.dist, recent: p.recent, prices };
 }
 
 function KeyPanel({ keyValue, onSave }: { keyValue: string; onSave: (k: string) => void }) {

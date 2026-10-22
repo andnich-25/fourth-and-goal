@@ -173,7 +173,7 @@ export function propPool(d: AskData, market: string, f: Filters = {}, side?: "ov
 
 /** The single most likely leg for each player across every market: anytime TD plus the likelier side of each prop.
  *  Props use the book line once prices are loaded; before that, the player's usual line (marked as such). */
-export function anyPool(d: AskData, f: Filters = {}, markets?: string[]): Pick[] {
+export function anyPool(d: AskData, f: Filters = {}, markets?: string[], onePerPlayer = true): Pick[] {
   const all: Pick[] = [];
   if (!markets || markets.includes("td")) all.push(...tdPool(d, f));
   const priced = !!d.feed.at;
@@ -191,9 +191,19 @@ export function anyPool(d: AskData, f: Filters = {}, markets?: string[]): Pick[]
       all.push({ ...propPick(d, m, r, line, over >= 0.5 ? "over" : "under"), lineSource: book != null ? "book" : "usual" });
     }
   }
+  all.sort((a, b) => b.p - a.p);
+  if (!onePerPlayer) return all;
   const best = new Map<string, Pick>();
-  for (const p of all.sort((a, b) => b.p - a.p)) if (!best.has(p.player_id)) best.set(p.player_id, p);
+  for (const p of all) if (!best.has(p.player_id)) best.set(p.player_id, p);
   return [...best.values()];
+}
+
+/** A pick as a parlay-builder slip leg, with every loaded book price for that exact side and line. */
+export function slipLeg(d: AskData, p: Pick) {
+  const prices: Record<string, string> = {};
+  for (const r of d.feed.get(p.market, p.player_id, p.side)) if (p.market === "td" || r.line === p.line) prices[r.book] = fmtPrice(r.price);
+  return { id: p.id, market: p.market, player_id: p.player_id, team: p.team, position: p.pos, game_id: p.game_id, p: p.p, side: p.side, name: p.name,
+    opponent: p.opp, label: p.market === "td" ? "Anytime TD" : d.props[p.market]?.label ?? p.market, line: p.line, dist: p.dist, recent: p.recent, prices };
 }
 
 export function answerAny(d: AskData, n: number, f: Filters, noTd = false): Answer {

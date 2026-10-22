@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answer, parse, type AskData } from "./ask";
+import { answer, anyPool, parse, type AskData } from "./ask";
 import type { RankingRow } from "./types";
 
 const row = (id: string, name: string, team: string, opp: string, pos: string, p: number, gid: string, day = "2026-10-25"): RankingRow =>
@@ -82,7 +82,11 @@ describe("ask parser", () => {
     expect(answer(withProps, "safest pick from each game").title).toContain("any market");
     expect(answer(withProps, "give me the highest rated prop from each game").title).toContain("any market");
     expect(answer(withProps, "best prop from each game, no TDs").picks?.every((p) => p.market !== "td")).toBe(true);
-    expect(answer(d, "one TD scorer from each game").title).toContain("TD scorer");
+    expect(answer(d, "one TD scorer from each game").title).toContain("TD scorer");    // The parlay builder's "All markets" list keeps every leg, not just each player's best one.
+    const every = anyPool(withProps, {}, undefined, false);
+    expect(every.filter((p) => p.player_id === "2").map((p) => p.market).sort()).toEqual(["receptions", "td"]);
+    expect(anyPool(withProps).filter((p) => p.player_id === "2")).toHaveLength(1);
+    expect(every.map((p) => p.p)).toEqual([...every.map((p) => p.p)].sort((a, b) => b - a));
   });
 
   it("leaves out backup quarterbacks and players without a real role", () => {
