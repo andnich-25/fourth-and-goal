@@ -33,8 +33,8 @@ export function LeanRow({ m, bt, to, sub, className }: { m: Lean; bt?: Backtest;
         </div>
       </div>
       <div className="text-right">
-        <div className="text-sm"><b className="text-base">{m.score.toFixed(1)}</b><span className="text-muted">/10</span></div>
-        <div className="flex items-center justify-end gap-1">
+        <RatingMeter score={m.score} p={m.p} fair={m.fair_p} ev={m.ev} proven={m.proven} />
+        <div className="mt-1 flex items-center justify-end gap-1">
           {m.proven ? <Badge tone="ok" title="This tier beat the -110 break-even (52.4%) on games the model never saw">Proven</Badge> : null}
           <TierBadge tier={tier} compact />
         </div>
@@ -58,3 +58,26 @@ export function TierLine({ t, money = false }: { t: { tier: string; n: number; r
 }
 
 export const roiText = (v: number | null | undefined) => (v == null ? "–" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`);
+
+/** The Lab rating out of 10 as ten blocks: green 7+ (the band that beat the price in testing), amber 5-7, grey under 5. */
+export function RatingMeter({ score, p, fair, ev, proven, size = "md" }: { score: number; p?: number; fair?: number; ev?: number; proven?: boolean; size?: "sm" | "md" }) {
+  const tone = score >= 7 ? "bg-ok" : score >= 5 ? "bg-warn" : "bg-muted/50";
+  const title = [`Lab rating ${score.toFixed(1)} of 10`, p != null ? `simulated chance ${pct(p, 1)}` : "", fair != null ? `calibrated on past results ${pct(fair, 1)}` : "",
+    ev != null ? `expected return ${ev >= 0 ? "+" : ""}${(ev * 100).toFixed(1)}¢ per $1` : "", proven === false && score >= 6.9 ? "capped below 7: not proven in testing" : ""]
+    .filter(Boolean).join(" · ");
+  return (
+    <div className="inline-flex items-center gap-2" title={title} aria-label={title}>
+      <div className={cn("flex gap-[2px]", size === "sm" ? "h-2" : "h-2.5")}>
+        {Array.from({ length: 10 }, (_, i) => {
+          const fill = Math.max(0, Math.min(1, score - i));
+          return (
+            <span key={i} className={cn("relative overflow-hidden rounded-[2px] bg-line", size === "sm" ? "w-1.5" : "w-2")}>
+              <span className={cn("absolute inset-y-0 left-0", tone)} style={{ width: `${fill * 100}%` }} />
+            </span>
+          );
+        })}
+      </div>
+      <span className="text-sm tabular-nums"><b className={size === "sm" ? "" : "text-base"}>{score.toFixed(1)}</b><span className="text-muted">/10</span></span>
+    </div>
+  );
+}

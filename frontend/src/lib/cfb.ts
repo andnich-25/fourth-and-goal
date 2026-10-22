@@ -11,7 +11,9 @@ export const MARKET_LABEL: Record<CfbMarket, string> = { spread: "Spread", total
 export type Offer = { price: number; book: string | null };
 export type Lean = {
   market: CfbMarket; side: string; team?: string; team_side?: "home" | "away"; line?: number; line_posted?: boolean;
-  p: number; score: number; push?: number; tier: string | null; proven: boolean; price?: number; ev?: number;
+  /** p = simulated chance; fair_p = that chance calibrated on past results; ev = expected return per $1 at the best price;
+   *  score = the Lab rating out of 10 (capped at 6.9 when the market or tier is not proven). */
+  p: number; score: number; fair_p?: number; rating?: number; push?: number; tier: string | null; proven: boolean; price?: number; ev?: number;
   best: Offer | null; reasons: string[];
 };
 export type CfbGame = {
@@ -40,7 +42,19 @@ export type Backtest = {
   opening_totals: { n: number; tiers: GameTier[]; by_season: { season: number; n: number; rate: number }[] } | null;
   model: { ratings_half_life_days: number; recency_half_life_seasons: number; sims: number };
   upsets?: Upsets;
+  rating?: RatingReport | null;
 };
+export type RatingBand = { lo: number; hi: number; n: number; win: number | null; roi: number | null; recent_n: number; recent_roi: number | null };
+export type RatingReport = { bands: RatingBand[]; by_market: Record<string, RatingBand[]>; first_season: number; recent_seasons: number[] };
+/** First PARLAY_SIMS simulated scores per game: home scores then away scores, two base-36 digits each. */
+export type Sims = { generated_at: string; n: number; games: Record<string, string> };
+export function decodeSims(s: string): { h: Int16Array; a: Int16Array } {
+  const n = s.length / 4;
+  const v = (i: number) => parseInt(s.substr(i * 2, 2), 36);
+  const h = new Int16Array(n), a = new Int16Array(n);
+  for (let i = 0; i < n; i++) { h[i] = v(i); a[i] = v(n + i); }
+  return { h, a };
+}
 export type Upsets = {
   calibration: { lo: number; hi: number; n: number; model: number; market: number; actual: number }[]; dogs: number; dog_win_rate: number;
   value_bets: { n: number; roi: number; win: number; dog_share: number; p_profit: number; roi_ci90: [number, number];
@@ -55,6 +69,7 @@ export type Team = { team_id: number; team: string; conference: string | null; w
 export type Teams = { season: number; teams: Team[] };
 export type PropRow = { game_id: number; player: string; player_id: string; team: string; opp: string; market: string; label: string;
   mean: number; line: number; line_source: "book" | "usual"; p_over: number; side: "over" | "under"; p: number; score: number;
+  fair_p?: number; ev?: number; rating?: number;
   tier: string | null; proven: boolean; recent: number[]; best: Offer | null };
 export type Props = { generated_at: string; rows: PropRow[]; backtest: { markets: Record<string, MarketReport>; note: string } };
 export type CfbRecord = { games: number; picks: number; empty_reason?: string; first_date?: string; last_date?: string;

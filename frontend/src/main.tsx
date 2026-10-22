@@ -32,6 +32,7 @@ import CfbAsk from "./pages/cfb/CfbAsk";
 import CfbTeams from "./pages/cfb/CfbTeams";
 import CfbProps from "./pages/cfb/CfbProps";
 import CfbResearch from "./pages/cfb/CfbResearch";
+import CfbParlay from "./pages/cfb/CfbParlay";
 import HitRates from "./pages/HitRates";
 import { EmptyState } from "./components/ui";
 import { STATIC } from "./lib/api";
@@ -78,6 +79,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Route path="cfb/teams" element={<CfbTeams />} />
               <Route path="cfb/props" element={<CfbProps />} />
               <Route path="cfb/research" element={<CfbResearch />} />
+              <Route path="cfb/parlay" element={<CfbParlay />} />
               <Route path="*" element={<EmptyState title="Page not found">That route does not exist.</EmptyState>} />
             </Route>
           </Routes>

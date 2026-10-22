@@ -6,7 +6,7 @@ import { useCfb, type Backtest, type Props, type Teams, type Week } from "@/lib/
 import { answer, SUGGESTIONS } from "@/lib/cfbAsk";
 import { PageTitle } from "@/components/Layout";
 import { Button, Card, CardHeader, Input, LoadingBlock } from "@/components/ui";
-import { LeanRow, NotPublished } from "./shared";
+import { LeanRow, NotPublished, RatingMeter } from "./shared";
 
 export default function CfbAsk() {
   const [sp, setSp] = useSearchParams();
@@ -51,7 +51,7 @@ export default function CfbAsk() {
               <div key={`${r.player_id}-${r.market}`} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                 <div className="min-w-0 flex-1"><div className="font-medium">{r.player}</div><div className="text-xs text-muted">{r.team} vs {r.opp} · projects {num(r.mean, 1)}</div></div>
                 <div className="text-right"><div className="font-semibold">{r.side === "over" ? "Over" : "Under"} {r.line} {r.label.toLowerCase()}</div>
-                  <div className="text-xs text-muted"><b className="text-fg">{r.score.toFixed(1)}</b>/10 · {r.line_source === "book" ? "book line" : "usual line"}</div></div>
+                  <div className="text-xs text-muted"><RatingMeter size="sm" score={r.score} p={r.p} fair={r.fair_p} ev={r.ev} proven={r.proven} /> · {r.line_source === "book" ? "book line" : "usual line"}</div></div>
               </div>
             ))}
             {!a.leans.length && !a.teams.length && !a.props.length && !a.text && <p className="p-4 text-sm text-muted">Nothing matches. Try one of the suggestions.</p>}

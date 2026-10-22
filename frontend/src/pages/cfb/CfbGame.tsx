@@ -4,7 +4,7 @@ import { num, pct } from "@/lib/format";
 import { MARKET_LABEL, bookName, fmtLine, fmtPrice, kick, ranked, useCfb, type Backtest, type Props, type Week } from "@/lib/cfb";
 import { PageTitle } from "@/components/Layout";
 import { Card, CardBody, CardHeader, LoadingBlock, Notice, Stat } from "@/components/ui";
-import { LeanRow, NotPublished } from "./shared";
+import { LeanRow, NotPublished, RatingMeter } from "./shared";
 
 export default function CfbGame() {
   const { id } = useParams();
@@ -41,7 +41,7 @@ export default function CfbGame() {
 
       {!!g.markets.length && (
         <Card>
-          <CardHeader title="Every market" subtitle="Score = the model's chance out of 10 from 5,000 simulated games. Pushes are left out, as books refund them." />
+          <CardHeader title="Every market" subtitle="Lab rating out of 10: the 5,000-game simulation's chance, checked against how similar leans really did and priced at the best odds. 7+ is the band that beat the books in testing. Hover a rating for the numbers." />
           <div className="divide-y divide-line/60">
             {g.markets.map((x) => (
               <div key={`${x.market}-${x.team ?? ""}`}>
@@ -89,7 +89,7 @@ export default function CfbGame() {
                 </div>
                 <div className="text-right">
                   <div className="font-semibold">{r.side === "over" ? "Over" : "Under"} {r.line} {r.label.toLowerCase()}</div>
-                  <div className="text-xs text-muted"><b className="text-fg">{r.score.toFixed(1)}</b>/10 · {r.line_source === "book" ? `book line${r.best ? `, ${fmtPrice(r.best.price)} ${bookName(r.best.book)}` : ""}` : "usual line"}</div>
+                  <div className="text-xs text-muted"><RatingMeter size="sm" score={r.score} p={r.p} fair={r.fair_p} ev={r.ev} proven={r.proven} /> · {r.line_source === "book" ? `book line${r.best ? `, ${fmtPrice(r.best.price)} ${bookName(r.best.book)}` : ""}` : "usual line"}</div>
                 </div>
               </div>
             ))}

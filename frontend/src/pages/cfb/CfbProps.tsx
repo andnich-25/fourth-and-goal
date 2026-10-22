@@ -3,7 +3,7 @@ import { num, pct } from "@/lib/format";
 import { bookName, fmtPrice, useCfb, type Props, type Week } from "@/lib/cfb";
 import { PageTitle } from "@/components/Layout";
 import { Badge, Card, CardBody, CardHeader, LoadingBlock, Notice, Segmented } from "@/components/ui";
-import { NotPublished } from "./shared";
+import { NotPublished, RatingMeter } from "./shared";
 
 const MK = [{ value: "all", label: "All" }, { value: "pass_yds", label: "Pass yds" }, { value: "rush_yds", label: "Rush yds" },
   { value: "rec_yds", label: "Rec yds" }, { value: "receptions", label: "Catches" }];
@@ -45,7 +45,7 @@ export default function CfbProps() {
                     <div className="text-right">
                       <div className="font-semibold">{r.side === "over" ? "Over" : "Under"} {r.line} {r.label.toLowerCase()}</div>
                       <div className="flex items-center justify-end gap-1 text-xs text-muted">
-                        <b className="text-fg">{r.score.toFixed(1)}</b>/10
+                        <RatingMeter size="sm" score={r.score} p={r.p} fair={r.fair_p} ev={r.ev} proven={r.proven} />
                         {r.proven && <Badge tone="ok">Proven</Badge>}
                         <span title={t ? `${t.tier}: ${pct(t.rate, 0)} of ${t.n.toLocaleString()} at usual lines in testing` : ""}>
                           {r.line_source === "book" ? `book${r.best ? ` ${fmtPrice(r.best.price)} ${bookName(r.best.book)}` : ""}` : "usual line"}

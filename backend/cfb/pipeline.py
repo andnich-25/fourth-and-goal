@@ -21,7 +21,7 @@ import pandas as pd
 
 from engine.util import utcnow
 
-from . import collect, history, model, props, report, sources
+from . import collect, history, model, props, rating, report, sources
 
 FREEZE_HOURS = 36      # a game's picks are frozen on the run before kickoff, within this many hours of it
 WEEK_DAYS = 8
@@ -130,7 +130,39 @@ def tier_of(tiers: list[dict], p: float, key: str = "p") -> dict | None:
     return None
 
 
-def game_rows(up: pd.DataFrame, ch: dict, summary: dict, lines: dict, qb: dict | None = None) -> list[dict]:
+PARLAY_SIMS = 1000   # simulated scores per game shipped to the parlay builder (same-game legs are priced from them)
+
+
+def _b36(v: np.ndarray) -> str:
+    d = "0123456789abcdefghijklmnopqrstuvwxyz"
+    v = np.clip(v.astype(int), 0, 36 * 36 - 1)
+    return "".join(d[x // 36] + d[x % 36] for x in v)
+
+
+def sim_strings(up: pd.DataFrame, h: np.ndarray, a: np.ndarray) -> dict:
+    """The first PARLAY_SIMS simulated scores of each game with a line, home then away, two base-36 digits each."""
+    return {str(int(gid)): _b36(h[i, :PARLAY_SIMS]) + _b36(a[i, :PARLAY_SIMS])
+            for i, gid in enumerate(up.game_id) if up.spread.iloc[i] == up.spread.iloc[i]}
+
+
+UNPROVEN_CAP = 6.9   # a lean from a market or tier that did not beat the price in testing never rates 7+
+
+
+def score_lean(m: dict, rater: dict | None, market: str | None = None) -> dict:
+    """The Lab rating out of 10 (rating.py): the simulated chance, calibrated on how similar leans did, priced at the
+    best odds on offer. Without a rater (no backtest), the plain chance x 10."""
+    if rater is None:
+        m["score"] = round(m["p"] * 10, 1)
+        return m
+    price = (m.get("best") or {}).get("price") or m.get("price")
+    dec = float(history.decimal(np.array([price]))[0]) if price else None
+    r = rating.rate(rater, market or m["market"], m["p"], dec, m.get("market_p", 0.5))
+    m.update(r)
+    m["score"] = r["rating"] if m["proven"] else min(r["rating"], UNPROVEN_CAP)
+    return m
+
+
+def game_rows(up: pd.DataFrame, ch: dict, summary: dict, lines: dict, qb: dict | None = None, rater: dict | None = None) -> list[dict]:
     mk = summary["markets"]
     qb = qb or {}
     rows = []
@@ -179,11 +211,13 @@ def game_rows(up: pd.DataFrame, ch: dict, summary: dict, lines: dict, qb: dict |
             price = bh["price"] if home else ba["price"]
             t = tier_of(mk["moneyline"]["tiers"], ev) if ev > 0 else None
             in_range = report.ML_PRICE_RANGE[0] <= price <= report.ML_PRICE_RANGE[1]
+            ih, ia = history.implied(np.array([g.ml_home, g.ml_away], float))
             markets.append({"market": "moneyline", "side": "home" if home else "away", "team": g.home_team if home else g.away_team,
-                            "p": ph if home else 1 - ph, "price": price, "ev": ev, "tier": t["tier"] if t else None,
+                            "p": ph if home else 1 - ph, "market_p": float((ih if home else ia) / (ih + ia)),
+                            "price": price, "ev": ev, "tier": t["tier"] if t else None,
                             "proven": bool(t and t["proven"] and in_range), "best": bh if home else ba})
         for m in markets:
-            m["score"] = round(m["p"] * 10, 1)
+            score_lean(m, rater)
         upset = None
         if g.ml_home == g.ml_home and g.ml_away == g.ml_away:
             ih, ia = history.implied(np.array([g.ml_home, g.ml_away], float))
@@ -537,7 +571,7 @@ def prop_rows(g: pd.DataFrame, oos: pd.DataFrame, up: pd.DataFrame, featured: se
     f = props.features(allp)
     hist = f[f.pass_yds.notna()]
     wf = props.walk_forward(hist, sources.CURRENT_SEASON - sources.PROP_SEASONS + 1, log=log)
-    tiers = {}
+    tiers, legs = {}, []
     for m in props.MARKETS:
         r = wf[(wf.market == m) & (wf.y != wf.line)]
         dd = pd.DataFrame({"p": np.maximum(r.p_over, 1 - r.p_over), "won": np.where(r.p_over >= 0.5, r.y > r.line, r.y < r.line).astype(int),
@@ -545,6 +579,16 @@ def prop_rows(g: pd.DataFrame, oos: pd.DataFrame, up: pd.DataFrame, featured: se
         seasons = sorted(dd.season.unique())
         tiers[m] = {"label": props.MARKETS[m], "tiers": report.tier_rows(dd, tiers=PROP_TIERS, recent=seasons[-2:]),
                     "n": int(len(dd)), "line": "usual"}
+        legs.append(dd.assign(market=m, dec=rating.DEC110, q=0.5))
+    PL = pd.concat(legs, ignore_index=True) if legs else pd.DataFrame()
+    rater = None
+    if len(PL) and PL.season.nunique() >= 2:
+        PL["ret"] = PL.won * PL.dec - 1
+        rater = rating.fit(PL)
+        seasons = sorted(PL.season.unique())
+        rating_report = rating.bands(rating.walk_forward(PL, min_seasons=1), [int(x) for x in seasons[-2:]])
+    else:
+        rating_report = None
     now_rows = f[f.pass_yds.isna()]
     out = []
     for m in props.MARKETS:
@@ -563,15 +607,16 @@ def prop_rows(g: pd.DataFrame, oos: pd.DataFrame, up: pd.DataFrame, featured: se
             p = max(po, 1 - po)
             tr = tier_of(tiers[m]["tiers"], p)
             recent = hist[hist.athlete_id == x.athlete_id].sort_values("date").tail(8)[m].tolist()[::-1]
-            out.append({"game_id": int(x.game_id), "player": x.athlete_name, "player_id": str(int(x.athlete_id)), "team": x.team,
-                        "opp": x.opp, "market": m, "label": props.MARKETS[m], "mean": float(mu_i), "line": line,
-                        "line_source": "book" if book_lines else "usual", "p_over": po, "side": side, "p": p,
-                        "score": round(p * 10, 1), "tier": tr["tier"] if tr else None,
-                        # picks only at lines books post
-                        "proven": bool(tr and tr["proven"] and book_lines), "recent": recent,
-                        "best": _best([{**o, "market": "p"} for o in offers], market="p", side=side, line=line)})
-    out.sort(key=lambda r: -r["p"])
-    return out, {"markets": tiers, "note": "Backtest at each player's usual line (median of his last five games); books' "
+            row = {"game_id": int(x.game_id), "player": x.athlete_name, "player_id": str(int(x.athlete_id)), "team": x.team,
+                   "opp": x.opp, "market": m, "label": props.MARKETS[m], "mean": float(mu_i), "line": line,
+                   "line_source": "book" if book_lines else "usual", "p_over": po, "side": side, "p": p,
+                   "tier": tr["tier"] if tr else None,
+                   # picks only at lines books post
+                   "proven": bool(tr and tr["proven"] and book_lines), "recent": recent,
+                   "best": _best([{**o, "market": "p"} for o in offers], market="p", side=side, line=line)}
+            out.append(score_lean(row, rater, m))
+    out.sort(key=lambda r: -r["score"])
+    return out, {"markets": tiers, "rating": rating_report, "note": "Backtest at each player's usual line (median of his last five games); books' "
                                            "prop lines are sharper, so the live record on posted lines is what counts."}
 
 
@@ -600,12 +645,16 @@ def run(out: Path, log=print, today: str | None = None, now: datetime | None = N
     summary = report.summarize(bt)
     opening = report.opening_totals(oos, bt)
     upset = report.upsets(bt)
+    legs = rating.legs_from_backtest(bt)
+    rater = rating.fit(legs)
+    rating_report = rating.bands(rating.walk_forward(legs), summary["recent_seasons"])
+    log(f"cfb rating: " + ", ".join(f"{b['lo']}+ {b['roi']:+.1%} (n={b['n']})" for b in rating_report["bands"] if b["n"]))
     finds = report.findings(g)
     for m, v in summary["markets"].items():
         log(f"cfb backtest {m}: proven tiers {[t['tier'] for t in v['tiers'] if t['proven']]}")
 
     up = g[upcoming].copy()
-    rows, props_rows, prop_tiers, coefs = [], [], {"markets": {}}, {}
+    rows, props_rows, prop_tiers, coefs, sims = [], [], {"markets": {}}, {}, {}
     if len(up):
         up, coefs = model.fit_live(g, up)
         for side in ("home", "away"):
@@ -622,12 +671,13 @@ def run(out: Path, log=print, today: str | None = None, now: datetime | None = N
         up = up.sort_values(["date", "game_id"]).reset_index(drop=True)
         pool = model.miss_pool(oos, nowts)
         h, a = model.simulate(up.pred_home.to_numpy(), up.pred_away.to_numpy(), pool, seed=7)
+        sims = sim_strings(up, h, a)
         # games without a posted line are still simulated (for the projection), at a placeholder line nobody sees
         sp = up.spread.fillna(0.5).to_numpy()
         tot = up.total.fillna(50.5).to_numpy()
         ch = model.chances(h, a, sp, tot, up.tt_home.fillna(0).to_numpy(), up.tt_away.fillna(0).to_numpy())
         qb = qb_changes(props.load_player_games(sources.CURRENT_SEASON), sources.CURRENT_SEASON)
-        rows = game_rows(up, ch, summary, lines, qb)
+        rows = game_rows(up, ch, summary, lines, qb, rater)
         for r in rows:
             for m in r["markets"]:
                 m["reasons"] = reasons(r, m)
@@ -645,14 +695,15 @@ def run(out: Path, log=print, today: str | None = None, now: datetime | None = N
 
     picks = [{"game_id": r["game_id"], "date": r["date"], "home": r["home"], "away": r["away"], **m}
              for r in rows for m in r["markets"] if m["proven"]]
-    picks.sort(key=lambda p: -p["p"])
+    picks.sort(key=lambda p: -p["score"])
     out.mkdir(parents=True, exist_ok=True)
     _write(out, "week.json", {"generated_at": utcnow(), "games": rows, "picks": picks,
                               "odds": {"books_games": sum(1 for r in rows if (r["line"]["source"] or "").endswith("sportsbooks")),
                                        "espn_games": sum(1 for r in rows if (r["line"]["source"] or "").startswith("ESPN")),
                                        "no_line": sum(1 for r in rows if not r["line"]["has_line"])}})
+    _write(out, "sims.json", {"generated_at": utcnow(), "n": PARLAY_SIMS, "games": sims})
     _write(out, "props.json", {"generated_at": utcnow(), "rows": props_rows, "backtest": prop_tiers})
-    _write(out, "backtest.json", {**summary, "opening_totals": opening, "upsets": upset,
+    _write(out, "backtest.json", {**summary, "opening_totals": opening, "upsets": upset, "rating": rating_report,
                                   "coefficients": coefs,
                                   "model": {"ratings_half_life_days": model.RATINGS[0][3],
                                             "recency_half_life_seasons": model.RECENCY_HALF_LIFE, "sims": model.SIMS}})

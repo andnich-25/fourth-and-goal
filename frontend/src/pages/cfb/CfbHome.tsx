@@ -1,11 +1,11 @@
 import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { MessageCircleQuestion } from "lucide-react";
-import { pct } from "@/lib/format";
-import { MARKET_LABEL, dayOf, fmtLine, fmtPrice, kick, useCfb, type Backtest, type CfbGame, type CfbStatus, type Week } from "@/lib/cfb";
+import { cn, pct } from "@/lib/format";
+import { MARKET_LABEL, dayOf, fmtLine, fmtPrice, kick, ranked, useCfb, type Backtest, type CfbGame, type CfbStatus, type Week } from "@/lib/cfb";
 import { PageTitle } from "@/components/Layout";
 import { Badge, Card, CardBody, CardHeader, Input, LoadingBlock, Notice, Segmented } from "@/components/ui";
-import { LeanRow, Matchup, NotPublished, roiText } from "./shared";
+import { LeanRow, Matchup, NotPublished, RatingMeter, roiText } from "./shared";
 
 export default function CfbHome() {
   const week = useCfb<Week>("week.json");
@@ -59,7 +59,7 @@ export default function CfbHome() {
 
       {w && (
         <Card>
-          <CardHeader title="Games" subtitle="Model score and 5,000-game simulation for every FBS game this week. Featured = ranked matchups."
+          <CardHeader title="Games" subtitle="Every FBS game: model score, then the moneyline, spread and over/under the model likes, each rated out of 10. Green picks are proven. Featured = ranked matchups."
             action={<Segmented size="sm" label="Show" value={show} onChange={setShow} options={[{ value: "featured", label: "Featured" }, { value: "all", label: "All" }]} />} />
           <div className="border-b border-line p-3"><Input value={find} onChange={(e) => setFind(e.target.value)} placeholder="Find a team" aria-label="Find a team" /></div>
           {[...byDay.entries()].map(([day, gs]) => (
@@ -82,23 +82,32 @@ export default function CfbHome() {
   );
 }
 
+const CELLS: { market: "moneyline" | "spread" | "total"; label: string }[] = [
+  { market: "moneyline", label: "Moneyline" }, { market: "spread", label: "Spread" }, { market: "total", label: "Over/under" }];
+
+/** One matchup: the two teams and model score, then moneyline, spread and over/under, each with its rating out of 10. */
 function GameLine({ g }: { g: CfbGame }) {
-  const sp = g.markets.find((m) => m.market === "spread");
-  const tot = g.markets.find((m) => m.market === "total");
-  const fav = g.line.spread == null ? null : g.line.spread <= 0 ? `${g.home} ${fmtLine(g.line.spread)}` : `${g.away} ${fmtLine(-g.line.spread)}`;
   return (
-    <Link to={`/cfb/game/${g.game_id}`} className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 px-4 py-2.5 text-sm hover:bg-raised/50 sm:grid-cols-[1fr_9rem_9rem]">
+    <Link to={`/cfb/game/${g.game_id}`} className="grid gap-x-4 gap-y-2 px-4 py-3 text-sm hover:bg-raised/50 md:grid-cols-[minmax(0,1.3fr)_repeat(3,minmax(0,1fr))] md:items-center">
       <div className="min-w-0">
-        <Matchup g={g} className="font-medium" />
-        <div className="text-xs text-muted">{kick(g.date)}{g.tv ? ` · ${g.tv}` : ""} · {fav ? `${fav}, O/U ${g.line.total ?? "–"}` : "no line yet"}</div>
+        <div className="font-medium">{ranked(g.away, g.away_rank)} <span className="tabular-nums text-muted">{g.model.away.toFixed(0)}</span></div>
+        <div className="font-medium">{g.neutral ? "vs " : "at "}{ranked(g.home, g.home_rank)} <span className="tabular-nums text-muted">{g.model.home.toFixed(0)}</span></div>
+        <div className="text-xs text-muted">{kick(g.date)}{g.tv ? ` · ${g.tv}` : ""} · model score</div>
       </div>
-      <div className="text-right text-xs sm:text-sm">
-        <div className="font-semibold tabular-nums">{g.away} {g.model.away.toFixed(0)}, {g.home} {g.model.home.toFixed(0)}</div>
-        <div className="text-muted">model score</div>
-      </div>
-      <div className="col-span-2 text-xs text-muted sm:col-span-1 sm:text-right">
-        {sp && <div>{sp.team} {fmtLine(sp.line!)} <b className="text-fg">{sp.score.toFixed(1)}</b></div>}
-        {tot && <div className={tot.proven ? "text-ok" : ""}>{tot.side === "over" ? "Over" : "Under"} {tot.line} <b className="text-fg">{tot.score.toFixed(1)}</b></div>}
+      <div className="divide-y divide-line/40 rounded-md bg-raised/40 md:contents">
+        {CELLS.map(({ market, label }) => {
+          const m = g.markets.find((x) => x.market === market);
+          return (
+            <div key={market} className="flex min-w-0 items-center justify-between gap-2 px-2.5 py-1.5 md:block md:p-0">
+              <div className="min-w-0">
+                <div className="text-[10px] font-medium uppercase tracking-wider text-muted">{label}</div>
+                {m ? <div className={cn("truncate font-semibold", m.proven && "text-ok")}>{market === "moneyline" ? `${m.team} ${fmtPrice(m.price)}` : market === "spread" ? `${m.team} ${fmtLine(m.line!)}` : `${m.side === "over" ? "Over" : "Under"} ${m.line}`}</div>
+                  : <div className="text-xs text-muted">no line yet</div>}
+              </div>
+              {m && <RatingMeter size="sm" score={m.score} p={m.p} fair={m.fair_p} ev={m.ev} proven={m.proven} />}
+            </div>
+          );
+        })}
       </div>
     </Link>
   );

@@ -2,7 +2,7 @@ import * as React from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity, BarChart3, BookOpen, Dices, MessageCircleQuestion, LayoutDashboard, ListOrdered, Moon, Settings, Shield, SlidersHorizontal, Sun, Percent, Menu, X, Trophy,
+  Activity, BarChart3, BookOpen, Dices, MessageCircleQuestion, LayoutDashboard, ListOrdered, Moon, Settings, Shield, SlidersHorizontal, Sun, Percent, Menu, X, Trophy, Layers,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/format";
@@ -49,6 +49,7 @@ const CFB_SECTIONS: { title: string; items: NavItem[] }[] = [
   { title: "Picks", items: [
     { to: "/cfb", label: "This week", short: "Home", icon: LayoutDashboard, end: true },
     { to: "/cfb/ask", label: "Ask", icon: MessageCircleQuestion },
+    { to: "/cfb/parlay", label: "Parlay builder", short: "Parlay", icon: Layers },
   ] },
   { title: "Research", items: [
     { to: "/cfb/teams", label: "Teams", icon: Trophy },
@@ -58,7 +59,7 @@ const CFB_SECTIONS: { title: string; items: NavItem[] }[] = [
   { title: "", items: [{ to: "/settings", label: "Settings", icon: Settings }] },
 ];
 const CFB_NAV = CFB_SECTIONS.flatMap((s) => s.items);
-const CFB_MOBILE = [CFB_NAV[0], CFB_NAV[1], CFB_NAV[2], CFB_NAV[4]];
+const CFB_MOBILE = [CFB_NAV[0], CFB_NAV[2], CFB_NAV[4], CFB_NAV[5]];
 
 type Sport = "nfl" | "nba" | "cfb";
 const sportOf = (path: string): Sport => (path === "/nba" || path.startsWith("/nba/") ? "nba" : path === "/cfb" || path.startsWith("/cfb/") ? "cfb" : "nfl");

@@ -153,3 +153,19 @@ def test_postgame_resim_scores_more_for_the_offense_that_played_better():
     pool = np.zeros((10, 2))
     out = model.postgame(box, game, pool)
     assert out.post_margin.iloc[0] > 20 and abs(out.post_total.iloc[0] - (out.post_home + out.post_away).iloc[0]) < 1e-9
+
+
+def test_rating_ranks_bigger_kept_edges_higher_and_caps_unproven():
+    from cfb import rating
+    rng = np.random.default_rng(5)
+    n = 4000
+    p = rng.uniform(0.5, 0.6, n)
+    L = pd.DataFrame({"p": p, "won": (rng.uniform(size=n) < 0.5 + 0.5 * (p - 0.5)).astype(int), "season": rng.integers(2018, 2026, n),
+                      "market": "total", "dec": rating.DEC110, "q": 0.5})
+    L["ret"] = L.won * L.dec - 1
+    r = rating.fit(L)
+    lo, hi = rating.rate(r, "total", 0.51, None), rating.rate(r, "total", 0.59, None)
+    assert hi["rating"] > lo["rating"] and hi["fair_p"] < 0.59          # calibrated toward what really happened
+    m = {"market": "total", "p": 0.59, "proven": False}
+    assert pipeline.score_lean(m, r)["score"] <= pipeline.UNPROVEN_CAP
+    assert not rating.walk_forward(L).empty

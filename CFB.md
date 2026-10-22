@@ -42,6 +42,19 @@ record. College football research, not betting advice. No pick is guaranteed.
 * A tier is a pick only if it beat 52.4% (the -110 break-even) over the whole test, did not lose over the last two
   seasons, and every stronger tier passed too. Props are picks only at book-posted lines.
 
+## Lab rating (out of 10)
+
+Every lean (game lines and props) gets a rating from `cfb/rating.py`: the simulated chance is calibrated on past
+results (an isotonic fit, per market, of how much of the simulation's edge over the market's own chance leans really
+kept; recent seasons count most), priced at the best odds on offer, and ranked against every past lean's expected
+return. Leans from markets or tiers that did not beat the price in testing stop at 6.9. Tested walk-forward (each
+season rated with fits from earlier seasons only): 7+ made money (about +1% per bet), under 7 lost about the books'
+cut; 7, 8 and 9 performed about the same. The bands are published in `backtest.json` (`rating`).
+
+The home page lists every matchup with the moneyline, spread and over/under the model likes, each with its rating.
+The **Parlay builder** (`/cfb/parlay`) offers those legs plus props at book-posted lines; legs from the same game are
+priced together from 1,000 of that game's simulated scores (`sims.json`), other legs multiply.
+
 ## Checking itself
 
 * **Data checks** every run (Research page): finished games missing a box score, play-by-play or closing line;
