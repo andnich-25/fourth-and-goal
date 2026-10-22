@@ -21,7 +21,7 @@ import pandas as pd
 
 from engine.util import utcnow
 
-from . import collect, correlation, history, predict, props, report, sources
+from . import collect, correlation, history, predict, props, report, sources, teamfit
 
 SITE_ROWS_MIN_MINUTES = report.PROP_MIN_MINUTES  # books rarely list deep-bench players
 
@@ -126,9 +126,12 @@ def run(out: Path, log=print, today: str | None = None) -> dict:
         bands = props.fit_alpha_bands(recent.y.to_numpy(), recent.mu.to_numpy(), recent.min_l.to_numpy())
         calib[market] = {"alpha_bands": bands, "platt": props.fit_platt(recent, bands)}
 
+    team_fit = teamfit.fit(oos["points"]) if "points" in validated else {"use": False, "reason": "points not validated"}
+    log(f"nba team check: use={team_fit.get('use')} plain={team_fit.get('plain')} adjusted={team_fit.get('adjusted')}")
+
     sched = predict.load_schedule()
     slate = predict.next_slate(sched, today)
-    proj = predict.project(d, slate, calib, log=log) if len(slate) else pd.DataFrame()
+    proj = predict.project(d, slate, calib, log=log, team_fit=team_fit) if len(slate) else pd.DataFrame()
     odds = book_odds(today)
     # Due is shown only in markets where, in testing, such players beat their projection at least as often as others.
     due_markets = {m for m, v in due["markets"].items() if v["beat_projection"] >= v["others_beat_projection"]}
@@ -160,6 +163,7 @@ def run(out: Path, log=print, today: str | None = None) -> dict:
                           "last_game_date": str(d[d.played].game_date.max().date())},
               "slate_date": slate_date, "slate_games": len(games), "projected_players": len({r["player_id"] for r in rows}),
               "validated_markets": sorted(validated), "recency_half_life_seasons": props.RECENCY_HALF_LIFE,
+              "team_check": {k: v for k, v in team_fit.items() if k != "fit_on_earlier"},
               "frozen": frozen, "license": sources.LICENSE_NOTE,
               "injuries_as_of": next(iter(predict.injuries().values()), {}).get("as_of")}
     _write(out, "status.json", status)

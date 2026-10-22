@@ -27,6 +27,9 @@ export default function NbaHow() {
         <p>Box scores for every game since {h ? `${h.first_season - 1}-${String(h.first_season).slice(2)}` : "2018-19"} ({h ? h.games.toLocaleString() : "—"} games, {h ? h.player_games.toLocaleString() : "—"} player-games), refreshed every morning, plus the ESPN injury report. Players listed Out are faded and never picked.</p>
         <p>For each player and market the model looks only at games before tonight: recent and longer-run minutes, how often he starts, his per-minute rate for the stat and his shot volume, both teams' pace, how much the opponent allows to his position compared with the league, rest days and home or away.
           A gradient-boosted model turns that into an average, and a negative binomial spread around it gives the chance of any line.</p>
+        <p><b>Rosters and team scoring.</b> Each morning's ESPN rosters decide who plays for whom, so a player who changed teams is projected for his new team before he has played for it.
+          Because each player is projected from his own history, a team that adds scorers can project to more points than it ever scores. When a team's rotation adds up high against its usual scoring, every player's points are scaled down (and up when it adds up low).
+          {st.data?.team_check?.plain && st.data.team_check.adjusted && <> On {st.data.team_check.test_seasons?.join(" and ")} games it never saw, this raised 6.0+ points leans from {pct(st.data.team_check.plain.strong_hit, 1)} to {pct(st.data.team_check.adjusted.strong_hit, 1)}{st.data.team_check.use ? "" : ", not enough to switch it on"}.</>}</p>
         <p><b>Recent seasons count most.</b> A game's weight halves every {st.data?.recency_half_life_seasons ?? 2} seasons, so last season counts about twice as much as two seasons before it, and the current season the most.</p>
       </Section>
       <Section title="How it is tested">

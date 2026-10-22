@@ -8,7 +8,7 @@ Basketball research, not betting advice. No pick is guaranteed.
 
 `.github/workflows/nba-collect.yml` runs at 16:00 UTC (before tip-off) and on demand from the Actions tab:
 
-1. **Collect** (`python -m nba.collect`): player box scores from 2018-19 on and this season's schedule from [sportsdataverse-data](https://github.com/sportsdataverse/sportsdataverse-data) (ESPN data, refreshed daily upstream), plus the ESPN injury report and scoreboard and sportsbook prices from The Odds API within budget (below).
+1. **Collect** (`python -m nba.collect`): player box scores from 2018-19 on and this season's schedule from [sportsdataverse-data](https://github.com/sportsdataverse/sportsdataverse-data) (ESPN data, refreshed daily upstream), plus the ESPN injury report, scoreboard and every team's roster, and sportsbook prices from The Odds API within budget (below).
 2. **Build** (`python -m nba.pipeline`): features, walk-forward check, confidence bands, Due study, same-game correlation, projections for the next slate, and the JSON the site reads (`site-data/nba/`).
 3. **Keep** the snapshots nobody else archives (prices, injury reports, scoreboards, each day's frozen leans) on the repository's `nba-data` branch, one file per day.
 4. When it finishes, "Refresh data and publish site" republishes the website with the new NBA numbers and the NFL pages from its last full run, so the NFL pipeline is not repeated daily.
@@ -24,6 +24,10 @@ For each market (points, rebounds, assists, threes, points + rebounds + assists)
 **Walk-forward:** from 2021-22 on, the model is refit at the start of every month on earlier games only and predicts that month. The spread and the over/under calibration are learned only from earlier months' out-of-sample predictions. Finished months are cached, so the daily run refits only the current month.
 
 **Gate:** a market shows over/under scores only if, on unseen games, it beats the player-average baseline on CRPS (month-bootstrap CI above zero) and on over/under Brier at the usual line, its chances are calibrated (ECE ≤ 0.025), and it is not worse than the baseline in the last full season.
+
+**Rosters:** the day's ESPN rosters decide each player's team (`nba/predict.py: slate_rows`). Without them, a player traded in the offseason would be projected for his old team until he played for the new one.
+
+**Team scoring check** (`nba/teamfit.py`): players are projected one at a time, so a team that adds scorers projects to more points than it scores. Points (and the points inside PRA) are scaled by `exp(a + b × log(rotation projected points / team's usual points))`, with a and b fit on the walk-forward's out-of-sample predictions. Who counts toward the sum is decided before the game (players who played the team's previous game). It is switched on only if it beats the plain model on the last two full seasons, held out: lean hits 59.6% → 60.4%, 6.0+ leans 65.8% → 66.6%, typical miss 4.93 → 4.92 points.
 
 **Lines:** the book line when prop prices are loaded, otherwise the player's usual line (median of his last 10 games rounded down plus 0.5). Historical book prop lines are not freely available, so the backtest uses the usual line.
 

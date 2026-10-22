@@ -135,6 +135,24 @@ def save_espn(day: str, log=print) -> dict:
     return out
 
 
+def save_rosters(day: str, log=print) -> dict:
+    """Every team's current roster (ESPN athlete ids, the same ids as the box scores). A player traded or signed in
+    the offseason stays on his old team in the box scores until he plays for the new one; the roster corrects that."""
+    dest = sources.archive_dir() / "rosters" / f"{day}.json"
+    teams, errors = {}, {}
+    for team in sorted(sources.NBA_TEAMS):
+        try:
+            data, _ = _get_json(f"{sources.ESPN}/teams/{team.lower()}/roster")
+            teams[team] = [{"id": str(a["id"]), "name": a.get("displayName", "")} for a in data.get("athletes", []) if a.get("id")]
+        except Exception as ex:  # noqa: BLE001 - a team that fails keeps the box-score roster
+            errors[team] = str(ex)
+    if teams:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps({"fetched_at": utcnow(), "source": f"{sources.ESPN}/teams/{{team}}/roster", "teams": teams}))
+    log(f"nba: saved rosters for {len(teams)} teams" + (f" ({len(errors)} failed)" if errors else ""))
+    return {"teams": len(teams), "errors": errors}
+
+
 # --------------------------------------------------------------------------- sportsbook prices
 def _credits(hdr: dict) -> tuple[float | None, float | None]:
     def num(k):
@@ -252,7 +270,7 @@ def run(log=print, force_odds: bool = False, force_files: bool = False) -> dict:
     day = today_et()
     files = download_files(log=log, force=force_files)
     status = {"date": day, "ran_at": utcnow(), "files": files, "box_scores": summarize_box(),
-              "espn": save_espn(day, log), "odds": save_odds(day, log, force_odds), "license": sources.LICENSE_NOTE}
+              "espn": save_espn(day, log), "rosters": save_rosters(day, log), "odds": save_odds(day, log, force_odds), "license": sources.LICENSE_NOTE}
     arch = sources.archive_dir()
     arch.mkdir(parents=True, exist_ok=True)
     (arch / "status.json").write_text(json.dumps(status, indent=2))

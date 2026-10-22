@@ -4,10 +4,19 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from engine import schemes
+
 from ..core import default_season_week, get_db
 
 router = APIRouter(prefix="/api", tags=["defenses"])
 POS = ("QB", "RB", "WR", "TE")
+NO_SCHEMES = "Scheme charting not built yet: run the pipeline with --download to fetch FTN and NGS charting."
+
+
+def _schemes(season, week):
+    """Scheme data describes the season so far; it is shown for the current week only (no look-ahead on old weeks)."""
+    s = schemes.load_result(season)
+    return s if s and s.get("available") and week > s["through_week"] else None
 
 
 def _weeks_for(c, season, week, defense, window):
@@ -75,8 +84,15 @@ def defenses(season: int | None = None, week: int | None = None, window: int | N
                   "xtd_pg": sum(r["positions"][p]["xtd"] for r in live) / max(1, sum(r["games"] for r in live))} for p in POS}
     trips = sum(r["rz_trips_allowed"] or 0 for r in live)
     league["rz_td_rate"] = sum(r["rz_td_drives_allowed"] or 0 for r in live) / trips if trips else None
+    sc = _schemes(season, week)
+    if sc:
+        for r in rows:
+            d = sc["defenses"].get(r["defense"], {})
+            r["scheme"] = {"rates": {k: v["value"] for k, v in d.get("rates", {}).items()},
+                           "top_shell": max(d.get("coverage_mix", {}).items(), key=lambda x: x[1], default=(None, None))}
     return {"season": season, "week": week, "window": window, "teams": rows, "league": league,
-            "coverage": "Coverage tracking not connected: no man/zone or Cover-1-4 charting source is imported.",
+            "coverage": (sc["coverage_note"] or "Coverage from this season's charting.") if sc else NO_SCHEMES,
+            "scheme_league": {k: v["league"] for k, v in next(iter(sc["defenses"].values()), {}).get("rates", {}).items()} if sc else None,
             "method": "Allowed stats credit the scoring offensive player's position; they describe where TDs happened, "
                       "not which defenders were responsible. Red-zone TD rate = opponent drives reaching the 20 that ended in a TD."}
 
@@ -99,5 +115,18 @@ def defense_detail(team: str, season: int | None = None, week: int | None = None
                                          WHERE e.season=? AND e.week<? AND e.defense=? AND e.td=1 ORDER BY e.week""", (season, week, team))]
     return {"season": season, "week": week, "team": team, "full": full, "last6": _summary(c, season, week, team, 6),
             "last3": _summary(c, season, week, team, 3), "weekly": weekly, "touchdowns_allowed": tds,
-            "upcoming": _upcoming(c, season, week).get(team),
-            "coverage": "Coverage tracking not connected."}
+            "upcoming": (up := _upcoming(c, season, week).get(team)),
+            "coverage": NO_SCHEMES if not (sc := _schemes(season, week)) else sc["coverage_note"],
+            "schemes": _team_schemes(sc, team, up)}
+
+
+def _team_schemes(sc, team, up):
+    if not sc or team not in sc["defenses"]:
+        return None
+    opp = up["opponent"] if up else None
+    return {"through_week": sc["through_week"], "charted_weeks": sc["charted_weeks"], "coverage_season": sc["coverage_season"],
+            "coverage_note": sc["coverage_note"], "method": sc["method"], "repeat_season": sc["repeat_season"],
+            "league_coverage_mix": sc["league_coverage_mix"], "defense": sc["defenses"][team], "offense": sc["offenses"].get(team),
+            "opponent": opp,
+            "opponent_attack": schemes.matchup(opp, team, sc) if opp else [],    # how tonight's offense fares vs this defense's schemes
+            "own_attack": schemes.matchup(team, opp, sc) if opp else []}        # this team's offense vs the opponent's schemes

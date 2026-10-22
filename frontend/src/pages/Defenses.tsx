@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ShieldOff } from "lucide-react";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "@/lib/api";
 import { cn, kickoff, num, pct, POSITIONS } from "@/lib/format";
@@ -146,7 +146,7 @@ export default function DefensesPage() {
             </Card>
             <div className="space-y-4">
               <Notice tone="info" title="Method">{d.method}</Notice>
-              <Notice tone="warn" title="Coverage tracking not connected"><ShieldOff className="mr-1 inline h-3.5 w-3.5" />{d.coverage} Man/zone shares are not shown rather than invented.</Notice>
+              <Notice tone="info" title="Schemes">{d.coverage} Open a defense for its blitz rate, man/zone, coverage shells, weak spots and this week's scheme matchup.</Notice>
             </div>
           </div>
         </>

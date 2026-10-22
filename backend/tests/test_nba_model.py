@@ -74,3 +74,51 @@ def test_freeze_keeps_first_projection(tmp_path, monkeypatch):
     assert pipeline.freeze("2026-10-22", [row])["picks"] == 1
     assert pipeline.freeze("2026-10-22", [dict(row, p_over=0.2)])["kept"]
     assert json.loads((tmp_path / "picks" / "2026-10-22.json").read_text())["picks"][0]["p_over"] == 0.61
+
+
+def test_team_check_recovers_the_scoring_squeeze_and_scales_an_overloaded_team():
+    from nba import teamfit
+    rng = np.random.default_rng(3)
+    load = rng.normal(0, 0.15, 20000)
+    mu = rng.uniform(5, 30, 20000)
+    y = rng.poisson(mu * np.exp(-0.02 - 0.3 * load))
+    a, b = teamfit.fit_poisson(y.astype(float), mu, load)
+    assert abs(a + 0.02) < 0.01 and abs(b + 0.3) < 0.03
+
+    from scipy import stats as st
+    def row(pid, team, market, mu_):
+        n = 20.0
+        return {"game_id": 1, "team": team, "player_id": pid, "market": market, "mu": mu_, "min_l": 30.0, "out": False,
+                "pts_for": 100.0, "q10": 0.0, "q90": 0.0,
+                "dist": {"type": "nbinom", "n": n, "p": n / (n + mu_), "cdf": list(st.nbinom.cdf(np.arange(60), n, n / (n + mu_))), "platt": [1, 0]}}
+    # BOS's rotation projects 130 points against a usual 100; NY's projects exactly 100
+    res = pd.DataFrame([row(i, "BOS", "points", 26.0) for i in range(5)] + [row(10 + i, "NY", "points", 20.0) for i in range(5)]
+                       + [row(0, "BOS", "pra", 40.0), row(0, "BOS", "rebounds", 8.0)])
+    out = teamfit.apply(res, {"use": True, "a": 0.0, "b": -0.3}, log=lambda *_: None)
+    f = np.exp(-0.3 * np.log(1.3))
+    bos = out[(out.team == "BOS") & (out.market == "points")]
+    assert np.allclose(bos.mu, 26.0 * f)
+    assert np.allclose(out[(out.team == "NY") & (out.market == "points")].mu, 20.0)
+    pra = out[(out.market == "pra")].iloc[0]
+    assert abs(pra.mu - (40.0 + (f - 1) * 26.0)) < 1e-9
+    assert out[out.market == "rebounds"].mu.iloc[0] == 8.0
+    # the published distribution moves with the mean
+    d = bos.dist.iloc[0]
+    assert abs(d["n"] * (1 - d["p"]) / d["p"] - 26.0 * f) < 1e-6
+    # not used when it did not beat the plain model
+    assert teamfit.apply(res, {"use": False}).mu.tolist() == res.mu.tolist()
+
+
+def test_todays_roster_moves_a_traded_player_to_his_new_team():
+    from nba import predict
+    d = _box()
+    slate = pd.DataFrame([{"game_id": 9999, "game_date": pd.Timestamp("2026-01-30"), "game_date_time": "2026-01-31T00:00Z",
+                           "home_abbreviation": "BOS", "away_abbreviation": "NY"}])
+    plain = predict.slate_rows(d, slate, 2026, roster={})
+    assert set(plain[plain.team == "BOS"].player_id) == {100, 101, 102, 103, 104}
+    # player 104 was traded to NY and player 103 was waived; neither has played since
+    roster = {100: "BOS", 101: "BOS", 102: "BOS", 104: "NY", 200: "NY", 201: "NY", 202: "NY", 203: "NY", 204: "NY"}
+    rows = predict.slate_rows(d, slate, 2026, roster=roster)
+    assert set(rows[rows.team == "BOS"].player_id) == {100, 101, 102}
+    moved = rows[rows.player_id == 104].iloc[0]
+    assert (moved.team, moved.opp, moved.home) == ("NY", "BOS", 0)

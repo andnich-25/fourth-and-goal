@@ -118,7 +118,7 @@ def run_props(c, season=2026, log=print) -> dict:
     return out
 
 
-def run_all(season=2026, download=False, force=False, steps=("sync", "build", "backtest", "predict", "props", "correlation", "odds", "picklog"), log=print) -> dict:
+def run_all(season=2026, download=False, force=False, steps=("sync", "build", "backtest", "predict", "props", "correlation", "schemes", "odds", "picklog"), log=print) -> dict:
     c = db.connect(paths.db_path())
     try:
         res = {}
@@ -136,6 +136,13 @@ def run_all(season=2026, download=False, force=False, steps=("sync", "build", "b
         if "correlation" in steps:
             rep = correlation.run(c, log)
             res["correlation"] = {"run_id": rep["run_id"], "used": rep["use_correlation"]}
+        if "schemes" in steps:
+            from . import schemes  # noqa: PLC0415
+            try:
+                rep = schemes.run(season, download, log)
+                res["schemes"] = {"available": rep.get("available"), "through_week": rep.get("through_week")}
+            except Exception as ex:  # noqa: BLE001 - the schemes page is extra; never stop the picks for it
+                log(f"schemes skipped: {ex}")
         if "odds" in steps:
             snap = odds.maybe_fetch(c, season, log)
             res["odds"] = {"fetched_at": snap["fetched_at"], "rows": len(snap["rows"])} if snap else None

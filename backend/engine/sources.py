@@ -38,6 +38,10 @@ KINDS: dict[str, SourceKind] = {
                            "Official weekly injury reports (Out/Doubtful/Questionable)"),
     "snaps": SourceKind("snaps", RELEASE_BASE + "/snap_counts/snap_counts_{year}.csv", "snaps_{year}.csv",
                         "Offensive snap counts (participation)"),
+    "ftn": SourceKind("ftn", RELEASE_BASE + "/ftn_charting/ftn_charting_{year}.csv", "ftn_{year}.csv",
+                      "FTN charting: pass rushers, blitzers, box count, play action, motion, screens (schemes page)"),
+    "participation": SourceKind("participation", RELEASE_BASE + "/pbp_participation/pbp_participation_{year}.csv",
+                                "participation_{year}.csv", "NGS participation: man/zone and coverage shell (schemes page)"),
     "schedules": SourceKind("schedules", RELEASE_BASE + "/schedules/games.csv", "schedules.csv",
                             "Schedule, kickoff times, results and market spread/total lines", seasonal=False),
 }

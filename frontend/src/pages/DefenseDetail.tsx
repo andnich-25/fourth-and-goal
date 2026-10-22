@@ -9,12 +9,14 @@ import { useLinkSuffix, useSeasonWeek } from "@/lib/state";
 import { PageTitle } from "@/components/Layout";
 import { Card, CardBody, CardHeader, ErrorState, LoadingBlock, Notice, PosBadge, Segmented, Stat, TableWrap, Td, TeamBadge, Th } from "@/components/ui";
 import type { DefenseRow } from "./Defenses";
+import { SchemesSection, type TeamSchemes } from "@/components/Schemes";
 
 type Detail = {
   season: number; week: number; team: string; full: DefenseRow; last6: DefenseRow; last3: DefenseRow;
   weekly: { week: number; offense: string; position: string; touchdowns: number; xtd: number; opportunities: number; rz_carries: number; rz_targets: number; goal5_carries: number; goal5_targets: number; ez_target_proxy: number }[];
   touchdowns_allowed: { week: number; offense: string; player_id: string; player_name: string; position: string; event_type: string; yards_to_goal: number; air_yards: number | null; description: string }[];
   upcoming: { opponent: string; home: boolean; gameday: string; gametime: string; opponent_implied_total: number | null } | null;
+  coverage: string | null; schemes: TeamSchemes | null;
 };
 const COLORS: Record<string, string> = { QB: "rgb(var(--muted))", RB: "rgb(var(--accent))", WR: "rgb(var(--info))", TE: "rgb(var(--warn))" };
 
@@ -57,6 +59,8 @@ export default function DefenseDetail() {
             <Stat label="Plays faced/g" value={num(s.plays_faced_pg)} />
           </CardBody></Card>
 
+          {d.schemes && <SchemesSection s={d.schemes} team={d.team} season={d.season} week={d.week} />}
+
           <div className="grid gap-5 lg:grid-cols-2">
             <Card>
               <CardHeader title="Allowed by offensive position" subtitle="Where touchdowns happened, not which defenders were assigned" />
@@ -96,7 +100,7 @@ export default function DefenseDetail() {
             </TableWrap>
           </Card>
 
-          <Notice tone="warn" title="Coverage tracking not connected">Man/zone and Cover 1–4 rates require a charting source that is not imported, so none are shown.</Notice>
+          {!d.schemes && <Notice tone="info" title="Scheme charting">{d.coverage ?? "Scheme charting is shown for the current week only."}</Notice>}
         </>
       )}
     </div>

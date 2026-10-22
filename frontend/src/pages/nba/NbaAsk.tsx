@@ -2,7 +2,7 @@ import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { MessageCircleQuestion } from "lucide-react";
 import { pct } from "@/lib/format";
-import { marketLabel, nbaTier, score10, useNba, type NbaConfidence, type NbaCorrelation, type Slate } from "@/lib/nba";
+import { marketLabel, nbaTier, score10, useNba, type MarketReport, type NbaConfidence, type NbaCorrelation, type NbaDue, type NbaRecord, type Slate } from "@/lib/nba";
 import { answer, SUGGESTIONS } from "@/lib/nbaAsk";
 import { toAmerican } from "@/lib/sim";
 import { PageTitle } from "@/components/Layout";
@@ -17,8 +17,13 @@ export default function NbaAsk() {
   const slate = useNba<Slate>("slate.json");
   const cor = useNba<NbaCorrelation>("correlation.json");
   const conf = useNba<NbaConfidence>("confidence.json");
+  const markets = useNba<{ markets: MarketReport[] }>("markets.json");
+  const record = useNba<NbaRecord>("record.json");
+  const due = useNba<NbaDue>("due.json");
   const ask = (text: string) => { setQ(text); setSp({ q: text }, { replace: true }); };
-  const a = React.useMemo(() => (asked && slate.data ? answer(asked, slate.data, cor.data?.buckets, !!cor.data?.use_correlation) : null), [asked, slate.data, cor.data]);
+  const a = React.useMemo(() => (asked && slate.data
+    ? answer(asked, slate.data, cor.data?.buckets, !!cor.data?.use_correlation, { conf: conf.data, markets: markets.data, record: record.data, due: due.data })
+    : null), [asked, slate.data, cor.data, conf.data, markets.data, record.data, due.data]);
   if (slate.isError) return <NotPublished error={slate.error} />;
   return (
     <div className="space-y-5">
@@ -37,6 +42,11 @@ export default function NbaAsk() {
       {a && (
         <Card>
           <CardHeader title={a.title} subtitle={a.text} />
+          {!!a.bullets?.length && (
+            <CardBody className="border-b border-line text-sm">
+              <ul className="list-disc space-y-1 pl-5 text-muted">{a.bullets.map((b) => <li key={b}>{b}</li>)}</ul>
+            </CardBody>
+          )}
           {a.parlay && (
             <CardBody className="border-b border-line text-sm">
               Chance all hit <b className="text-lg">{pct(a.parlay.joint, 1)}</b> (fair odds {toAmerican(1 / Math.max(a.parlay.joint, 1e-6))}) from {a.parlay.draws.toLocaleString()} simulated games; multiplying gives {pct(a.parlay.independent, 1)}.
@@ -57,8 +67,14 @@ export default function NbaAsk() {
                 </div>
               </Link>
             ))}
-            {!a.items.length && !a.text && <p className="p-4 text-sm text-muted">Nothing matches. Try one of the suggestions.</p>}
+            {!a.items.length && !a.text && !a.bullets?.length && <p className="p-4 text-sm text-muted">Nothing matches. Try one of the suggestions.</p>}
           </div>
+          {!!a.suggestions?.length && (
+            <CardBody className="flex flex-wrap gap-2 border-t border-line">
+              <span className="text-xs text-muted">Try:</span>
+              {a.suggestions.map((s) => <button key={s} onClick={() => ask(s)} className="rounded-full border border-line px-3 py-1 text-xs text-muted hover:text-fg">{s}</button>)}
+            </CardBody>
+          )}
         </Card>
       )}
     </div>
