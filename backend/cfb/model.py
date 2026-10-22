@@ -24,6 +24,9 @@ RATINGS = (  # prefix, home column, away column, half-life (days), ridge penalty
     ("y", "home_ypp", "away_ypp", 120, 4.0),
     ("n", "home_plays", "away_plays", 120, 4.0),
     ("t", "home_to", "away_to", 120, 20.0),
+    ("e", "home_epa", "away_epa", 120, 0.5),        # EPA per play (play-by-play, garbage time out)
+    ("s", "home_sr", "away_sr", 120, 0.5),          # success rate
+    ("x", "home_expl", "away_expl", 120, 0.5),      # explosive-play rate
 )
 RECENCY_HALF_LIFE = 2.0   # seasons
 ALPHA = 10.0
@@ -65,6 +68,9 @@ def features(d: pd.DataFrame, kind: str) -> pd.DataFrame:
             "points": d.r_home - d.r_away,
             "yards": (ypp_h * n_h - ypp_a * n_a) / 10,
             "turnovers": _fill(d, "t_home", 1.5) - _fill(d, "t_away", 1.5),
+            "epa": (_fill(d, "e_home", 0.05) - _fill(d, "e_away", 0.05)) * 10,
+            "success": (_fill(d, "s_home", 0.42) - _fill(d, "s_away", 0.42)) * 10,
+            "explosive": (_fill(d, "x_home", 0.07) - _fill(d, "x_away", 0.07)) * 10,
             "home": (~d.neutral).astype(float),
             "short_dog": (absp <= 3.5).astype(float) * np.where(fav_home, -1.0, 1.0),
         }, index=d.index)
@@ -73,6 +79,9 @@ def features(d: pd.DataFrame, kind: str) -> pd.DataFrame:
         "points": d.r_home + d.r_away,
         "yards": (ypp_h * n_h + ypp_a * n_a) / 10,
         "plays": n_h + n_a,
+        "epa": (_fill(d, "e_home", 0.05) + _fill(d, "e_away", 0.05)) * 10,
+        "success": (_fill(d, "s_home", 0.42) + _fill(d, "s_away", 0.42)) * 10,
+        "explosive": (_fill(d, "x_home", 0.07) + _fill(d, "x_away", 0.07)) * 10,
         "high_total": (d.total - 60).clip(lower=0),
         "blowout": (absp >= 21).astype(float),
         "neutral": d.neutral.astype(float),
@@ -137,6 +146,53 @@ def fit_live(g: pd.DataFrame, upcoming: pd.DataFrame) -> tuple[pd.DataFrame, dic
     coefs = {"margin": dict(zip(features(train.head(1), "margin").columns, np.round(m.coef_, 4))),
              "total": dict(zip(features(train.head(1), "total").columns, np.round(t.coef_, 4)))}
     return u, coefs
+
+
+# ----------------------------------------------------------------------- post-game re-simulation
+BOX_SEASONS = 3
+
+
+def _box_features(d: pd.DataFrame, side: str) -> pd.DataFrame:
+    opp = "away" if side == "home" else "home"
+    plays = d[f"{side}_plays"]
+    return pd.DataFrame({
+        "yards": d[f"{side}_ypp"] * plays / 10,
+        "plays": plays,
+        "turnovers": d[f"{side}_to"],
+        "opp_turnovers": d[f"{opp}_to"],          # short fields
+        "epa": d[f"{side}_epa"] * plays / 10,
+        "success": d[f"{side}_sr"] * 10,
+        "explosive": d[f"{side}_expl"] * 10,
+    }, index=d.index)
+
+
+def fit_box(g: pd.DataFrame, before: pd.Timestamp) -> Ridge | None:
+    """Points a team 'should' have scored from how it actually played (yards, pace, turnovers both ways, EPA,
+    success and explosive rates), fit on the last BOX_SEASONS seasons of finals before `before`."""
+    d = g[g.final & (g.date < before) & (g.date >= before - pd.Timedelta(days=365 * BOX_SEASONS))]
+    X = pd.concat([_box_features(d, "home"), _box_features(d, "away")])
+    y = pd.concat([d.home_points, d.away_points]).astype(float)
+    ok = X.notna().all(axis=1)
+    if ok.sum() < 500:
+        return None
+    return Ridge(alpha=1.0).fit(X[ok], y[ok])
+
+
+def postgame(box: Ridge, games: pd.DataFrame, pool: np.ndarray, seed: int = 11) -> pd.DataFrame:
+    """Re-run the 5,000-game simulation after the final, this time from what each offense actually did (plays,
+    yards, turnovers both ways, EPA, success and explosive rates) instead of the pregame expectations. Comparing it
+    with the pregame simulation splits each miss in two: how far off our inputs were (pregame vs post-game sim) and
+    what no input explains (post-game sim vs the final: red-zone finishing, special teams, bounces)."""
+    d = games.copy()
+    Xh, Xa = _box_features(d, "home"), _box_features(d, "away")
+    ok = Xh.notna().all(axis=1) & Xa.notna().all(axis=1)
+    d = d[ok].copy()
+    if d.empty:
+        return d.assign(post_home=[], post_away=[], post_margin=[], post_total=[])
+    h, a = simulate(box.predict(Xh[ok]), box.predict(Xa[ok]), pool, seed=seed)
+    d["post_home"], d["post_away"] = h.mean(1), a.mean(1)
+    d["post_margin"], d["post_total"] = d.post_home - d.post_away, d.post_home + d.post_away
+    return d
 
 
 # --------------------------------------------------------------------------- simulation

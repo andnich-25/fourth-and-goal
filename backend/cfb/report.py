@@ -249,3 +249,43 @@ def findings(g: pd.DataFrame) -> list[dict]:
         row["holds"] = bool(len(rois) == 2 and min(rois) > 0)
         out.append(row)
     return out
+
+
+def upsets(bt: pd.DataFrame, seed: int = 0) -> dict:
+    """How the model does on underdogs: does a dog it gives 35% really win 35% of the time, and how did the
+    moneyline value bets (mostly dogs) do season by season, with a bootstrap over weeks for how sure we can be."""
+    m = bt[bt.ml_home.notna() & bt.ml_away.notna() & (bt.margin != 0)]
+    ih, ia = history.implied(m.ml_home.to_numpy()), history.implied(m.ml_away.to_numpy())
+    fair_h = ih / (ih + ia)
+    dog_home = fair_h < 0.5
+    d = pd.DataFrame({"p": np.where(dog_home, m.p_home_win, 1 - m.p_home_win), "market": np.where(dog_home, fair_h, 1 - fair_h),
+                      "won": np.where(dog_home, m.margin > 0, m.margin < 0).astype(int)}, index=m.index)
+    bins = []
+    for lo, hi in ((0, 0.1), (0.1, 0.2), (0.2, 0.3), (0.3, 0.4), (0.4, 0.5)):
+        t = d[(d.p >= lo) & (d.p < hi)]
+        if len(t):
+            bins.append({"lo": lo, "hi": hi, "n": int(len(t)), "model": float(t.p.mean()), "market": float(t.market.mean()),
+                         "actual": float(t.won.mean())})
+    ml = moneyline_bets(bt)
+    v = ml[ml.ev >= ML_TIERS[1][1]]
+    out = {"calibration": bins, "dogs": int(len(d)), "dog_win_rate": float(d.won.mean())}
+    if len(v):
+        wk = v.season.astype(str) + "-" + bt.loc[v.index, "week"].astype(str)
+        gs = v.groupby(wk).ret.agg(["sum", "size"])
+        rng = np.random.default_rng(seed)
+        boots = []
+        for _ in range(2000):
+            i = rng.integers(0, len(gs), len(gs))
+            boots.append(gs["sum"].to_numpy()[i].sum() / gs["size"].to_numpy()[i].sum())
+        bands = []
+        for lo, hi, name in ((-400, -101, "Favorites"), (100, 150, "+100 to +150"), (151, 250, "+151 to +250"), (251, 300, "+251 to +300")):
+            t = v[(v.price >= lo) & (v.price <= hi)]
+            if len(t):
+                bands.append({"band": name, "n": int(len(t)), "win": float(t.won.mean()), "roi": float(t.ret.mean())})
+        out["value_bets"] = {"n": int(len(v)), "roi": float(v.ret.mean()), "win": float(v.won.mean()),
+                             "dog_share": float((v.price > 0).mean()), "p_profit": float((np.array(boots) > 0).mean()),
+                             "roi_ci90": [float(x) for x in np.percentile(boots, [5, 95])],
+                             "by_season": [{"season": int(s), "n": int(len(x)), "roi": float(x.ret.mean()), "win": float(x.won.mean())}
+                                           for s, x in v.groupby("season")],
+                             "by_price": bands}
+    return out

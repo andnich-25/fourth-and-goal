@@ -30,6 +30,13 @@ export default function CfbGame() {
         <Stat label="Total" value={g.line.total ?? "–"} sub={`model ${num(m.total, 1)}; 80% land ${m.total_q[0]}–${m.total_q[2]}`} />
         <Stat label={`${g.home} wins`} value={pct(m.home_win, 0)} sub={`margin ${m.margin_q[0] > 0 ? "+" : ""}${m.margin_q[0]} to ${m.margin_q[2] > 0 ? "+" : ""}${m.margin_q[2]} (80%)`} />
       </div>
+      {(g.notes ?? []).map((n) => <Notice key={n} tone="warn" title="Check before betting">{n}</Notice>)}
+      {g.upset && g.upset.p >= 0.3 && (
+        <Notice title={g.upset.pick ? "Upset pick" : "Upset chance"}>
+          {g.upset.team} wins {pct(g.upset.p, 0)} of the 5,000 simulated games{g.upset.market != null ? `; the moneyline${g.upset.price != null ? ` (${fmtPrice(g.upset.price)})` : ""} implies ${pct(g.upset.market, 0)}` : ""}.
+          {g.upset.pick ? " That gap is in the moneyline value tier, which made money in testing." : ""}
+        </Notice>
+      )}
       {!m.line_based && <Notice tone="warn" title="No line yet">The score comes from the team ratings alone. Leans and picks appear once a book posts a line.</Notice>}
 
       {!!g.markets.length && (
@@ -50,10 +57,10 @@ export default function CfbGame() {
       )}
 
       <Card>
-        <CardHeader title="Team ratings" subtitle="Opponent-adjusted, refit before every week; the last two seasons count most." />
+        <CardHeader title="Team ratings" subtitle="What each team is expected to do in this game: opponent-adjusted, refit before every week, the last two seasons count most. EPA and success rate leave out garbage time." />
         <CardBody className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead><tr className="text-xs text-muted"><th className="text-left font-medium" /><th className="text-right font-medium">Expected points</th><th className="text-right font-medium">Yards per play</th><th className="text-right font-medium">Plays</th></tr></thead>
+            <thead><tr className="text-xs text-muted"><th className="text-left font-medium" /><th className="text-right font-medium">Expected points</th><th className="text-right font-medium">Yards per play</th><th className="text-right font-medium">Plays</th><th className="text-right font-medium">EPA/play</th><th className="text-right font-medium">Success</th></tr></thead>
             <tbody>
               {(["away", "home"] as const).map((s) => (
                 <tr key={s} className="border-t border-line/60">
@@ -61,6 +68,8 @@ export default function CfbGame() {
                   <td className="text-right tabular-nums">{num(g.ratings[s].pts_for, 1)}</td>
                   <td className="text-right tabular-nums">{num(g.ratings[s].ypp, 2)}</td>
                   <td className="text-right tabular-nums">{num(g.ratings[s].plays, 0)}</td>
+                  <td className="text-right tabular-nums">{num(g.ratings[s].epa, 2)}</td>
+                  <td className="text-right tabular-nums">{pct(g.ratings[s].success, 0)}</td>
                 </tr>
               ))}
             </tbody>

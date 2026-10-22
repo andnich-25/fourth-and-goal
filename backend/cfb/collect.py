@@ -79,7 +79,8 @@ def plan_files(season: int = sources.CURRENT_SEASON) -> list[tuple[str, int | No
     plan: list[tuple[str, int | None]] = [("schedule", y) for y in range(sources.FIRST_SEASON, season + 1)]
     plan += [("team_box", y) for y in range(sources.FIRST_SEASON + 2, season + 1)]
     plan += [("player_box", y) for y in range(season - sources.PROP_SEASONS - 2, season + 1)]
-    plan += [("lines", None), ("pbp", season)]
+    plan += [("lines", None)]
+    plan += [("pbp", y) for y in range(sources.FIRST_TEST_SEASON, season + 1)]
     return plan
 
 
@@ -93,7 +94,13 @@ def download_files(season: int = sources.CURRENT_SEASON, log=print, force: bool 
         dest = raw / sources.local_name(kind, yr)
         current = yr is None or yr == season
         fresh = dest.exists() and (time.time() - dest.stat().st_mtime) < STALE_HOURS[kind] * 3600
+        stats = raw / sources.local_name("pbp_stats", yr) if kind == "pbp" else None
+        if stats is not None and not current and stats.exists() and not force:
+            out.append({"file": stats.name, "status": "kept"})   # finished season: only the per-game summary is kept
+            continue
         if dest.exists() and not force and (not current or fresh):
+            if stats is not None and not stats.exists():
+                _summarize_pbp(dest, stats, log, keep=current)
             out.append({"file": dest.name, "status": "kept"})
             continue
         try:
@@ -103,10 +110,27 @@ def download_files(season: int = sources.CURRENT_SEASON, log=print, force: bool 
             tmp.replace(dest)
             out.append({"file": dest.name, "status": "downloaded", "bytes": len(body)})
             log(f"cfb: downloaded {dest.name} ({len(body) / 1e6:.1f} MB)")
+            if stats is not None:
+                _summarize_pbp(dest, stats, log, keep=current)
         except Exception as ex:  # noqa: BLE001 - an older copy, when present, is still usable
             out.append({"file": dest.name, "status": f"failed: {ex}"})
             log(f"cfb: {dest.name} not downloaded ({ex})")
     return out
+
+
+def _summarize_pbp(src, dest, log=print, keep: bool = True) -> None:
+    """Play-by-play files are 70-130 MB a season; the model needs only per-game efficiency, so that is saved and a
+    finished season's play-by-play is deleted. The current season's file is kept (its lines are read from it)."""
+    from . import history  # noqa: PLC0415
+
+    try:
+        history.aggregate_pbp(src).to_csv(dest, index=False)
+        log(f"cfb: summarized {src.name} -> {dest.name}")
+    except Exception as ex:  # noqa: BLE001 - the model runs without it, just with less information
+        log(f"cfb: could not summarize {src.name} ({ex})")
+        return
+    if not keep:
+        src.unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------------- ESPN scoreboard and poll

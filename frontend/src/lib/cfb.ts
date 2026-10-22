@@ -21,8 +21,12 @@ export type CfbGame = {
   line: { spread: number | null; total: number | null; ml_home: number | null; ml_away: number | null; tt_home: number | null;
     tt_away: number | null; tt_posted: boolean; source: string | null; fetched_at: string | null; has_line: boolean };
   model: { home: number; away: number; margin: number; total: number; margin_q: number[]; total_q: number[]; home_win: number; line_based: boolean };
-  ratings: Record<"home" | "away", { pts_for: number | null; ypp: number | null; plays: number | null; games: number | null }>;
+  ratings: Record<"home" | "away", { pts_for: number | null; ypp: number | null; plays: number | null; epa?: number | null; success?: number | null;
+    turnovers?: number | null; explosive?: number | null; games: number | null }>;
   markets: Lean[];
+  /** The underdog's side of the game: model win chance vs the market's (vig removed). pick = the proven moneyline value bet is on the dog. */
+  upset?: { team: string; side: "home" | "away"; p: number; market: number | null; price: number | null; pick: boolean } | null;
+  notes?: string[];
 };
 export type CfbPick = Lean & { game_id: number; date: string; home: string; away: string };
 export type Week = { generated_at: string; games: CfbGame[]; picks: CfbPick[]; odds: { books_games: number; espn_games: number; no_line: number } };
@@ -35,6 +39,12 @@ export type Backtest = {
   markets: Record<CfbMarket, MarketReport>; calibration: Record<string, { p: number; actual: number }[]>;
   opening_totals: { n: number; tiers: GameTier[]; by_season: { season: number; n: number; rate: number }[] } | null;
   model: { ratings_half_life_days: number; recency_half_life_seasons: number; sims: number };
+  upsets?: Upsets;
+};
+export type Upsets = {
+  calibration: { lo: number; hi: number; n: number; model: number; market: number; actual: number }[]; dogs: number; dog_win_rate: number;
+  value_bets: { n: number; roi: number; win: number; dog_share: number; p_profit: number; roi_ci90: [number, number];
+    by_season: { season: number; n: number; roi: number; win: number }[]; by_price: { band: string; n: number; win: number; roi: number }[] } | null;
 };
 export type Finding = { market: "spread" | "total" | "moneyline"; pattern: string; side: string; holds: boolean;
   eras: { era: string; n: number; rate?: number | null; roi?: number | null }[] };
@@ -50,9 +60,22 @@ export type Props = { generated_at: string; rows: PropRow[]; backtest: { markets
 export type CfbRecord = { games: number; picks: number; empty_reason?: string; first_date?: string; last_date?: string;
   by_market_tier?: { market: CfbMarket; tier: string | null; n: number; hits: number; rate: number; roi: number | null }[];
   suggested?: { n: number; hits: number; rate: number | null };
-  recent?: { game_id: number; date: string; market: CfbMarket; tier: string; p: number; won: number; label: string; side: string; line: number | null }[] };
+  recent?: { game_id: number; date: string; market: CfbMarket; tier: string; p: number; won: number; label: string; side: string; line: number | null }[];
+  report_card?: ReportCard };
+type ScoreLine = { label: string; date: string; model_total: number; total: number; model_margin: number; margin: number };
+/** After the games: frozen projections vs finals, next to the book's line, plus the post-game re-simulation. */
+export type ReportCard = { games: number; note?: string;
+  margin?: { model_mae: number; line_mae: number | null }; total?: { model_mae: number; line_mae: number | null };
+  resim?: { games: number; total_input_miss: number; total_rest_miss: number; margin_input_miss: number; margin_rest_miss: number;
+    games_list: (ScoreLine & { post_total: number; post_margin: number })[] } | null;
+  inputs?: { input: string; n: number; bias: number; mae: number }[];
+  by_week?: { date: string; n: number; margin_mae: number; total_mae: number }[];
+  biggest_misses?: ScoreLine[];
+  props?: { market: string; label: string; n: number; model_mae: number; line_mae: number; hit: number | null }[] };
+export type DataCheck = { check: string; value: string; ok: boolean; games?: number[] };
 export type CfbStatus = { generated_at: string; season: number; games_this_week: number; picks: number; props: number;
-  history: { first_season: number; games: number; lined_games: number; last_game_date: string }; proven: Record<CfbMarket, string[]> };
+  history: { first_season: number; games: number; lined_games: number; last_game_date: string }; proven: Record<CfbMarket, string[]>;
+  checks?: DataCheck[] };
 
 const BASE = `${import.meta.env.BASE_URL}data/cfb/`;
 

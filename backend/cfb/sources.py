@@ -30,6 +30,7 @@ KINDS = {
     "schedule": (REPO + "/schedules/csv/cfb_schedules_{year}.csv", "cfb_schedules_{year}.csv"),
     "lines": (REPO + "/betting/csv/cfb_line_odds.csv.gz", "cfb_line_odds.csv.gz"),
     "pbp": (RELEASES + "/cfbfastR_cfb_pbp/play_by_play_{year}.parquet", "play_by_play_{year}.parquet"),
+    "pbp_stats": ("", "pbp_stats_{year}.csv"),   # built by the collector from "pbp"
     "team_box": (RELEASES + "/espn_cfb_team_box/team_box_{year}.csv", "team_box_{year}.csv"),
     "player_box": (RELEASES + "/espn_cfb_player_box/player_box_{year}.csv", "player_box_{year}.csv"),
 }
