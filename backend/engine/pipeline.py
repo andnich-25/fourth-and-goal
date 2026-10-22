@@ -110,7 +110,7 @@ def run_props(c, season=2026, log=print) -> dict:
     return out
 
 
-def run_all(season=2026, download=False, force=False, steps=("sync", "build", "backtest", "predict", "props", "correlation", "odds"), log=print) -> dict:
+def run_all(season=2026, download=False, force=False, steps=("sync", "build", "backtest", "predict", "props", "correlation", "odds", "picklog"), log=print) -> dict:
     c = db.connect(paths.db_path())
     try:
         res = {}
@@ -131,6 +131,10 @@ def run_all(season=2026, download=False, force=False, steps=("sync", "build", "b
         if "odds" in steps:
             snap = odds.maybe_fetch(c, season, log)
             res["odds"] = {"fetched_at": snap["fetched_at"], "rows": len(snap["rows"])} if snap else None
+        if "picklog" in steps:
+            from . import picklog  # noqa: PLC0415
+            rep = picklog.run(c, season, log)
+            res["picklog"] = {"graded": rep.get("graded", 0)}
         st = status.write_build_status(c, season)
         log(f"build_status.json written: ready={st['ready']} promoted={st['model']['promoted']}")
         return res

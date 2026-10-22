@@ -81,6 +81,14 @@ def due(c: sqlite3.Connection = Depends(get_db)):
     return due_study.latest(c)
 
 
+@router.get("/live")
+def live():
+    """Every pick the site suggested, frozen at kickoff and graded after the game (engine/picklog.py)."""
+    from engine import picklog
+
+    return picklog.latest()
+
+
 @router.get("/tuning")
 def tuning():
     """Results of the last tuning study (python -m engine.tuning), if one has been run."""

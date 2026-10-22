@@ -11,7 +11,7 @@ import { PageTitle } from "@/components/Layout";
 import { Badge, Card, CardBody, ErrorState, Input, LoadingBlock, PosBadge, Segmented, Select, TableWrap, Td, TeamBadge, Th } from "@/components/ui";
 import { Flags, NoDataState, TierBadge } from "@/components/shared";
 import { useConfidence, tierFor } from "@/lib/confidence";
-import { overReasons, PLAYABLE_NOTE, underReasons, usualLine, type Recent } from "@/lib/ask";
+import { estimatedLine, overReasons, PLAYABLE_NOTE, underReasons, type Recent } from "@/lib/ask";
 import { likelyToPlay, starterQbs } from "@/lib/playing";
 import { ladder, playable, type Playable } from "@/lib/hitrates";
 
@@ -88,7 +88,7 @@ function ScoreGuide() {
           <div className="font-semibold">How to read the confidence scores</div>
           <p className="mt-1 text-sm text-muted">Each player gets an <b className="text-fg">Under</b> score and an <b className="text-fg">Over</b> score out of 10 for the line shown.
             The score is the model's chance of that side, so an 8.7 under is an 87% chance and the over is 1.3. The two always add to 10. The bigger number is the lean and is highlighted.
-            The line is the book line when one is loaded, otherwise the player's usual line (his recent median, rounded to a half point), and you can type your own.</p>
+            The line is the book line when one is loaded, otherwise the player's usual line (his recent median, rounded to a half point), or this week's projection when his recent games came in a different role, and you can type your own.</p>
         </div>
         {p && (
           <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
@@ -135,9 +135,9 @@ export default function PropsPage() {
   const view = (d?.rows ?? []).filter((r) => (search ? r.player_name.toLowerCase().includes(search.toLowerCase()) : playing(r))).map((r) => {
     const typed = lines[key(r)] ?? {};
     const fl = feedLine(feed, market, r.player_id);
-    const usual = usualLine(r, market) ?? Math.floor(r.median) + 0.5;
-    const line = typed.line != null && typed.line !== "" ? Number(typed.line) : fl ?? usual;
-    const source = typed.line ? "yours" : fl != null ? "book" : "usual";
+    const est = estimatedLine(r, market);
+    const line = typed.line != null && typed.line !== "" ? Number(typed.line) : fl ?? est.line;
+    const source = typed.line ? "yours" : fl != null ? "book" : est.kind;
     const over = r.dist && Number.isFinite(line) ? pOver(r.dist, line) : null;
     const lean: "over" | "under" | null = over == null ? null : over > 0.5 ? "over" : "under";
     const leanP = over == null ? null : Math.max(over, 1 - over);
@@ -217,7 +217,7 @@ export default function PropsPage() {
                         <Td>
                           <Input aria-label={`Line for ${r.player_name}`} inputMode="decimal" placeholder={String(line)} value={typed.line ?? ""}
                             onChange={(e) => setLines({ ...lines, [k]: { ...typed, line: e.target.value } })} className="h-8 w-20" />
-                          {source !== "yours" && <div className="mt-0.5 text-[10px] text-muted">{source === "book" ? "book line" : "usual line"}</div>}
+                          {source !== "yours" && <div className="mt-0.5 text-[10px] text-muted">{source === "book" ? "book line" : source === "projected" ? "projected line" : "usual line"}</div>}
                         </Td>
                         <Td>{over != null ? <ConfidenceSplit over={over} /> : r.dist ? <span className="text-muted">—</span> : <span className="text-xs text-muted" title="Not validated">hidden</span>}</Td>
                         <Td>{lean ? <div className="flex items-center gap-1.5 whitespace-nowrap"><span className="font-semibold">{lean === "under" ? "Under" : "Over"} {line}</span>{r.eligible ? <TierBadge tier={tier} compact /> : null}</div> : <span className="text-muted">—</span>}</Td>

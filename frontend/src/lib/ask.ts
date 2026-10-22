@@ -472,10 +472,19 @@ const statOf = (m: string) => STAT[m] ?? m;
 const POS_NAME: Record<string, string> = { QB: "quarterbacks", RB: "running backs", WR: "receivers", TE: "tight ends" };
 const YARDS = new Set(["pass_yards", "rush_yards", "rec_yards", "rush_rec_yards", "pass_tds"]);
 
-/** The usual line for a player: his recent median rounded to a book-style half point (the line the backtest graded). */
-export function usualLine(r: PropRow, market: string): number | null {
+/** The line to show before books post one: his recent median rounded to a book-style half point (the line the
+ *  backtest graded), unless that sits far from this week's projection. Then his recent games came in a different role
+ *  (a backup now starting, a starter coming back from a short game) and no book would post it (e.g. 4.5 pass attempts
+ *  for a starting QB), so this week's projection, rounded the same way, is used instead and marked as projected. */
+export function estimatedLine(r: { median: number; evidence?: Record<string, number | null> }, market: string): { line: number; kind: "usual" | "projected" } {
   const m = r.evidence?.[`${statOf(market)}_med`];
-  return m == null ? null : Math.floor(m) + 0.5;
+  const projected = { line: Math.max(0.5, Math.floor(r.median) + 0.5), kind: "projected" as const };
+  if (m == null) return projected;
+  const line = Math.floor(m) + 0.5;
+  return Math.abs(r.median - line) > Math.max(1.5, 0.2 * Math.max(line, r.median)) ? projected : { line, kind: "usual" };
+}
+export function usualLine(r: PropRow, market: string): number | null {
+  return estimatedLine(r, market).line;
 }
 
 /** Plain reasons a player may fall short of a line, strongest first, from pregame data only. */

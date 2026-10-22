@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answer, anyPool, parse, type AskData } from "./ask";
+import { answer, anyPool, estimatedLine, parse, type AskData } from "./ask";
 import type { RankingRow } from "./types";
 
 const row = (id: string, name: string, team: string, opp: string, pos: string, p: number, gid: string, day = "2026-10-25"): RankingRow =>
@@ -87,6 +87,11 @@ describe("ask parser", () => {
     expect(every.filter((p) => p.player_id === "2").map((p) => p.market).sort()).toEqual(["receptions", "td"]);
     expect(anyPool(withProps).filter((p) => p.player_id === "2")).toHaveLength(1);
     expect(every.map((p) => p.p)).toEqual([...every.map((p) => p.p)].sort((a, b) => b - a));
+  });
+
+  it("never shows a line from a different role (a backup's 4.5 pass attempts once he starts)", () => {
+    expect(estimatedLine({ median: 23.9, evidence: { attempts_med: 4 } }, "pass_attempts")).toEqual({ line: 23.5, kind: "projected" });
+    expect(estimatedLine({ median: 37.2, evidence: { attempts_med: 38.5 } }, "pass_attempts")).toEqual({ line: 38.5, kind: "usual" });
   });
 
   it("leaves out backup quarterbacks and players without a real role", () => {
