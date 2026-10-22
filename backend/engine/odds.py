@@ -111,7 +111,12 @@ def p_over_desc(desc: dict, line: float) -> float:
     raw = min(0.995, max(0.005, raw))
     a, b = desc.get("platt") or (1.0, 0.0)
     z = a * np.log(raw / (1 - raw)) + b
-    return float(min(0.995, max(0.005, 1 / (1 + np.exp(-z)))))
+    model = float(min(0.995, max(0.005, 1 / (1 + np.exp(-z)))))
+    sim = desc.get("sim")
+    if not sim:
+        return model
+    from .gamesim import blend_p  # noqa: PLC0415
+    return blend_p(model, sim, line)
 
 
 def _model_chances(c: sqlite3.Connection, season: int, week: int) -> tuple[dict, dict]:

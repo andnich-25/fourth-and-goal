@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Dices, Download, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn, num, pct } from "@/lib/format";
-import { tierFor, useConfidence } from "@/lib/confidence";
+import { proven, tierFor, useConfidence } from "@/lib/confidence";
 import { feedLine, useFeed, type Feed } from "@/lib/feed";
 import { TierBadge } from "@/components/shared";
 import { MARKET_GROUPS, pOver, type PropDist } from "@/lib/props";
@@ -300,8 +300,9 @@ function Picker({ ranks, season, week, slip, add, buckets, useCorr, setSlip, fee
     return b ? { leg: { ...l, prices: feedPrices(feed, l) }, dec: b.decimal, edge: l.p - 1 / b.decimal } : null;
   };
   const candidates = (): SlipLeg[] => {
-    if (source === "td") return goal === "likely" ? tdRows.slice(0, 30).map(tdLeg) : tdRows.map(tdLeg);
-    if (source === "all") return goal === "likely" ? allRows.filter((p) => p.p >= 0.5).slice(0, 40).map(pickLeg) : allRows.map(pickLeg);
+    // "Most likely" only uses legs from tiers that hit 50%+ on unseen weeks.
+    if (source === "td") return goal === "likely" ? tdRows.filter((r) => proven(conf.data, "td", r.p_model)).slice(0, 30).map(tdLeg) : tdRows.map(tdLeg);
+    if (source === "all") return goal === "likely" ? allRows.filter((p) => proven(conf.data, p.kind, p.p)).slice(0, 40).map(pickLeg) : allRows.map(pickLeg);
     if (!meta) return [];
     const out: SlipLeg[] = [];
     for (const r of propRows) {
@@ -309,7 +310,7 @@ function Picker({ ranks, season, week, slip, add, buckets, useCorr, setSlip, fee
       if (!raw || !Number.isFinite(ln)) continue;
       for (const side of ["over", "under"] as const) out.push(propLeg(r, source, meta.label, ln, side));
     }
-    return goal === "likely" ? out.filter((l) => l.p >= 0.5) : out;
+    return goal === "likely" ? out.filter((l) => proven(conf.data, "props", l.p)) : out;
   };
   const suggest = () => {
     let pool = candidates();
@@ -337,7 +338,7 @@ function Picker({ ranks, season, week, slip, add, buckets, useCorr, setSlip, fee
     setSuggestNote(chosen.length ? "" : noLines ? "No book lines for this market yet: type a line next to the players you want, or wait for the Saturday price pull."
       : goal === "value" ? (feed.at ? "No leg in this market beats the best sportsbook price by 3+ points right now."
         : "Best value needs sportsbook prices, and none have been fetched for this week yet.")
-      : "No leg in this market is more likely than not at its line.");
+      : "No leg in this market comes from a tier that hit 50%+ on unseen weeks.");
     if (chosen.length) setSlip(chosen);
   };
   return (

@@ -31,7 +31,7 @@ type MarketsResp = { markets: MarketMeta[]; note: string };
 const CHECK_LABELS: Record<string, string> = {
   enough_rows: "enough test games", enough_weeks: "enough test weeks", beats_baselines_crps: "beats both baselines",
   crps_gain_ci_excludes_zero: "improvement is statistically clear", beats_baselines_over_brier: "better over/under accuracy than baselines",
-  over_calibrated: "over/under chances are honest", range_calibrated: "10–90% ranges hold", latest_season_not_worse: "holds up this season",
+  over_calibrated: "over/under chances are honest", range_calibrated: "8-in-10 ranges hold", latest_season_not_worse: "holds up this season",
 };
 const EVIDENCE_LABELS: Record<string, string> = {
   team_implied_total: "Team implied pts", opp_implied_total: "Opp implied pts", n_games_cur: "Games this season", snap_pct: "Snap share",
@@ -204,7 +204,6 @@ export default function PropsPage() {
             <table className="w-full">
               <thead><tr>
                 <Th>Player</Th><Th>Opp</Th><Th className="text-right" title="Middle of the projected range: half of outcomes above, half below">Projection</Th>
-                <Th className="text-right" title="80% of outcomes should land in this range">10–90%</Th>
                 <Th>{m?.label ?? "Line"} line</Th><Th title="Confidence out of 10 for each side. They add to 10; the bigger one is the lean.">Under · Over (out of 10)</Th><Th>Lean</Th>
                 <Th title="Optional: American odds for the lean side. Filled with the best book price when prices are loaded.">Price</Th>
                 <Th className="text-right" title="Our chance of the lean side minus the book's implied chance (which includes the book's margin)">vs book</Th>
@@ -227,7 +226,6 @@ export default function PropsPage() {
                         </Td>
                         <Td className="text-muted">{r.opponent}</Td>
                         <Td className="text-right font-semibold">{num(r.median, m?.kind === "count" ? 0 : 1)}</Td>
-                        <Td className="text-right text-muted">{num(r.q10, 0)}–{num(r.q90, 0)}</Td>
                         <Td>
                           <Input aria-label={`Line for ${r.player_name}`} inputMode="decimal" placeholder={String(line)} value={typed.line ?? ""}
                             onChange={(e) => setLines({ ...lines, [k]: { ...typed, line: e.target.value } })} className="h-8 w-20" />
@@ -243,7 +241,7 @@ export default function PropsPage() {
                           <ChevronDown className={cn("h-4 w-4 transition", open === r.player_id && "rotate-180")} /></button></Td>
                       </tr>
                       {open === r.player_id && (
-                        <tr className="border-b border-line bg-raised/30"><td colSpan={11} className="px-4 py-3">
+                        <tr className="border-b border-line bg-raised/30"><td colSpan={10} className="px-4 py-3">
                           {/* Pinned to the visible part of the table so it stays readable when the table is scrolled sideways on a phone. */}
                           <div className="sticky left-4 max-w-[calc(100vw-5rem)] sm:max-w-none">
                           {lean && (
@@ -253,6 +251,7 @@ export default function PropsPage() {
                                 : <p className="mt-1 text-sm text-muted">No single factor stands out; the lean comes from the model weighing everything below together.</p>}
                             </div>
                           )}
+                          <Outlook r={r} digits={m?.kind === "count" ? 0 : 1} />
                           {r.dist && <LineLadder r={r} line={line} pl={playable(feed, market, r)} />}
                           <div className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-4">
                             {Object.entries(r.evidence).map(([ek, v]) => (
@@ -275,6 +274,18 @@ export default function PropsPage() {
       )}
       {d?.note && <p className="text-xs text-muted">{d.note}</p>}
     </div>
+  );
+}
+
+/** The projection in plain words: the middle outcome, the usual spread, and the 5,000-game simulation where it is used. */
+export function Outlook({ r, digits }: { r: PropRow; digits: number }) {
+  const sim = r.dist?.sim;
+  return (
+    <p className="mb-3 text-sm">
+      <span className="font-semibold">Projection {num(r.median, digits)}.</span>{" "}
+      <span className="text-muted">8 in 10 games should land between {num(r.q10, 0)} and {num(r.q90, 0)}.</span>
+      {sim && <span className="text-muted"> Simulated {(sim.runs ?? 5000).toLocaleString()} times with each team's volume, target and carry shares and the defense: middle result {num(sim.median ?? sim.q[49], digits)}. The chance above blends the model and this simulation, which beat the model alone on unseen weeks for this stat.</span>}
+    </p>
   );
 }
 
@@ -329,7 +340,7 @@ export function MarketCard({ m }: { m: MarketMeta }) {
         {m.tested && (
           <div className="flex flex-wrap gap-6 text-sm">
             <div><div className="label">Typical miss</div><div className="font-semibold">{num(m.mae_median, 1)} <span className="text-xs font-normal text-muted">vs {num(m.baseline_mae_median, 1)} player avg</span></div></div>
-            <div><div className="label">10–90% range held</div><div className="font-semibold">{pct(m.coverage_10_90, 0)} <span className="text-xs font-normal text-muted">expected {pct(m.coverage_expected, 0)}</span></div></div>
+            <div><div className="label">8-in-10 range held</div><div className="font-semibold">{pct(m.coverage_10_90, 0)} <span className="text-xs font-normal text-muted">expected {pct(m.coverage_expected, 0)}</span></div></div>
             <div><div className="label">Strong leans correct</div><div className="font-semibold">{m.lean_hit_rate != null ? pct(m.lean_hit_rate, 0) : "—"} <span className="text-xs font-normal text-muted">{m.lean_n} picks ≥60%, at each player's usual line</span></div></div>
             <div><div className="label">Tested on</div><div className="font-semibold">{m.test_rows?.toLocaleString()} <span className="text-xs font-normal text-muted">games, {m.test_weeks} weeks</span></div></div>
           </div>

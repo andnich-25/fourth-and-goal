@@ -2,7 +2,7 @@
    in an answer comes from the published data (rankings, prop projections, sportsbook feed); nothing is invented.
    The same functions back the optional AI mode, which may only call them as tools. */
 import type { Confidence, Tier } from "@/lib/confidence";
-import { tierFor } from "@/lib/confidence";
+import { PROVEN_NOTE, proven, tierFor } from "@/lib/confidence";
 import type { Feed, OddsRow } from "@/lib/feed";
 import { feedLine } from "@/lib/feed";
 import { pOver, type PropDist } from "@/lib/props";
@@ -198,6 +198,9 @@ export function anyPool(d: AskData, f: Filters = {}, markets?: string[], onePerP
   return [...best.values()];
 }
 
+/** Suggestions only use legs from tiers that proved 50%+ on unseen weeks. */
+export const isProven = (d: AskData, p: Pick) => proven(d.conf, p.kind, p.p);
+
 /** A pick as a parlay-builder slip leg, with every loaded book price for that exact side and line. */
 export function slipLeg(d: AskData, p: Pick) {
   const prices: Record<string, string> = {};
@@ -207,15 +210,15 @@ export function slipLeg(d: AskData, p: Pick) {
 }
 
 export function answerAny(d: AskData, n: number, f: Filters, noTd = false): Answer {
-  const picks = anyPool(d, f, noTd ? Object.keys(d.props) : undefined).slice(0, n);
-  if (!picks.length) return none(d, "No picks match that", f);
+  const picks = anyPool(d, f, noTd ? Object.keys(d.props) : undefined).filter((p) => isProven(d, p)).slice(0, n);
+  if (!picks.length) return none(d, "No proven picks match that", f);
   const usual = picks.some((p) => p.lineSource === "usual");
   return {
     title: `${picks.length === 1 ? "Safest pick" : `Safest ${picks.length} picks`} across every market${describe(f) ? ` (${describe(f)})` : ""}`,
     summary: `The highest validated chance for each player across ${noTd ? "every prop market (no TDs)" : "anytime TD and every prop market"}, one pick per player.`,
     picks, notes: [
       ...(usual ? ["No book lines are loaded yet, so props are shown at each player's usual line (his recent median, rounded to a half point), and only where that line is close to this week's projection. Books may still set a different line, so check it before betting."] : []),
-      ...noteTier(picks), ...priceNote(d)],
+      PROVEN_NOTE, ...noteTier(picks), ...priceNote(d)],
     followups: ["Build a 3-leg parlay from these", "Best value bets", "Who will fall short this week?"],
   };
 }
@@ -241,7 +244,8 @@ export function answerTop(d: AskData, n: number, f: Filters): Answer {
 }
 
 export function answerPerGame(d: AskData, market: string, f: Filters): Answer {
-  const pool = market === "any" ? anyPool(d, f) : market === "any-props" ? anyPool(d, f, Object.keys(d.props)) : market === "td" ? tdPool(d, f) : propPool(d, market, f);
+  const pool = (market === "any" ? anyPool(d, f) : market === "any-props" ? anyPool(d, f, Object.keys(d.props)) : market === "td" ? tdPool(d, f) : propPool(d, market, f))
+    .filter((p) => isProven(d, p));
   const byGame = new Map<string, Pick>();
   for (const p of pool) if (!byGame.has(p.game_id)) byGame.set(p.game_id, p);
   const picks = [...byGame.values()].sort((a, b) => b.p - a.p);
@@ -254,7 +258,7 @@ export function answerPerGame(d: AskData, market: string, f: Filters): Answer {
     picks, notes: [
       `Chance at least ${Math.ceil(picks.length / 2)} of ${picks.length} hit: ${pct(sim.hits.slice(Math.ceil(picks.length / 2)).reduce((a, b) => a + b, 0))}. ` +
       `All ${picks.length} together: ${(sim.joint * 100).toFixed(sim.joint < 0.01 ? 2 : 1)}% (so treat these as single bets, not one parlay).`,
-      ...noteTier(picks), ...priceNote(d)],
+      `Games with no proven pick are left out. ${PROVEN_NOTE}`, ...noteTier(picks), ...priceNote(d)],
     followups: ["Top 5 TD scorers", "Best value bets this week", "Safest 3-leg parlay"],
   };
 }
@@ -304,6 +308,7 @@ export function answerParlay(d: AskData, legs: number, f: Filters, opts: { marke
   // No market named: the highest-chance legs from every market (anytime TD and the likelier side of each prop).
   const market = opts.market ?? "any";
   let pool = market === "td" ? tdPool(d, f).slice(0, 40) : market === "any" ? anyPool(d, f).slice(0, 60) : propPool(d, market, f).filter((p) => p.p >= 0.5);
+  if (!opts.value) pool = pool.filter((p) => isProven(d, p));
   if (new Set(pool.map((p) => p.game_id)).size === 1) opts = { ...opts, sameGame: true }; // a single-game slate (e.g. Thursday)
   if (opts.value) pool = pool.filter((p) => p.price != null && (p.edge as number) >= MIN_EDGE);
   const chosen: Pick[] = [];
@@ -322,7 +327,7 @@ export function answerParlay(d: AskData, legs: number, f: Filters, opts: { marke
     chosen.push(best);
     current = bestScore;
   }
-  if (!chosen.length) return none(d, opts.value ? "No legs beat the best price by 3+ points" : "Not enough legs to build that parlay", f);
+  if (!chosen.length) return none(d, opts.value ? "No legs beat the best price by 3+ points" : "Not enough proven legs to build that parlay", f);
   const sim = simulate(chosen.map(toSim), d.buckets, d.useCorr, 40000);
   const priced = chosen.every((p) => p.price != null);
   const price = priced ? chosen.reduce((a, p) => a * dec(p.price as number), 1) : undefined;
@@ -333,7 +338,7 @@ export function answerParlay(d: AskData, legs: number, f: Filters, opts: { marke
     picks: chosen, parlay: { joint: sim.joint, independent: sim.independent, price, legs: chosen.length },
     notes: [price ? `Best prices multiplied: ${american(price)}, which implies ${pct(1 / price)} vs our ${pct(sim.joint)}.` : "Add prices in the parlay builder to compare against the books.",
       ...(chosen.some((p) => p.lineSource === "usual") ? ["Some legs use the player's usual line because no book line is loaded for them; check the book's line before betting."] : []),
-      ...noteTier(chosen)],
+      ...(opts.value ? [] : [PROVEN_NOTE]), ...noteTier(chosen)],
     followups: ["Open this in the parlay builder", "Best value bets this week", "One TD scorer from each game"],
   };
 }
@@ -385,7 +390,7 @@ function explainProp(d: AskData, r: PropRow, m: string, forceSide?: "over" | "un
   const e = r.evidence ?? {};
   const st = statOf(m);
   const facts: string[] = [];
-  facts.push(`Projection ${num1(r.median)} (80% range ${num1(r.q10)}–${num1(r.q90)}) against a line of ${line}${book == null ? " (his usual line; no book line loaded)" : ""}.`);
+  facts.push(`Projection ${num1(r.median)} (8 in 10 games between ${num1(r.q10)} and ${num1(r.q90)}) against a line of ${line}${book == null ? " (his usual line; no book line loaded)" : ""}.`);
   const rec = (r.recent ?? []).slice(0, 8);
   if (rec.length) facts.push(`Last ${rec.length} games, newest first: ${rec.map((g) => `${num1(g.value)} vs ${g.opponent}`).join(", ")}. Over ${line} in ${rec.filter((g) => g.value > line).length} of ${rec.length}.`);
   const avg = [e[`${st}_cur`] != null ? `season ${num1(e[`${st}_cur`] as number)}` : "", e[`${st}_l3`] != null ? `last 3 ${num1(e[`${st}_l3`] as number)}` : "",
@@ -687,7 +692,7 @@ export function answerLadder(d: AskData, ids: string[], market?: string, window 
   const book = feedLine(d.feed, m, id);
   return {
     title: `${r.player_name}: ${d.props[m].label} at every line`,
-    summary: `Each line with this week's model chance and how often he cleared it in his last ${rungs[0]?.games ?? 0} games. Projection ${num1(r.median)} (80% range ${num1(r.q10)}–${num1(r.q90)}).${book != null ? ` Book line: ${book}.` : ""}`,
+    summary: `Each line with this week's model chance and how often he cleared it in his last ${rungs[0]?.games ?? 0} games. Projection ${num1(r.median)} (8 in 10 games between ${num1(r.q10)} and ${num1(r.q90)}).${book != null ? ` Book line: ${book}.` : ""}`,
     table: { columns: ["Line", "Model over", "Model under", `Over, last ${rungs[0]?.games ?? 0}`, "Over, last 5"],
       rows: rungs.map((x) => [`${x.line}${x.line === book ? " (book)" : ""}`, pct(x.over ?? 0), pct(1 - (x.over ?? 0)), `${frac(x.hits, x.games)} (${pct(x.games ? x.hits / x.games : 0)})`, frac(x.hits5, x.games5)]) },
     notes: [`Recent games, newest first: ${(r.recent ?? []).slice(0, window).map((g) => `${num1(g.value)} vs ${g.opponent}`).join(", ")}.`,
@@ -750,7 +755,7 @@ export function answerLeaders(d: AskData, market: string, n: number, f: Filters,
   return {
     title: `${lowest ? "Lowest" : "Highest"} projected ${lc(label)}${describe(f) ? ` (${describe(f)})` : ""}`,
     summary: "This week's projection (the middle outcome) with the range he lands in 8 times out of 10.",
-    table: { columns: ["Player", "Team", "Opp", "Projection", "80% range", "Last 3 avg"], rows: rows.map((r) => [r.player_name, r.team, r.opponent, num1(r.median), `${num1(r.q10)}–${num1(r.q90)}`,
+    table: { columns: ["Player", "Team", "Opp", "Projection", "8 in 10 games", "Last 3 avg"], rows: rows.map((r) => [r.player_name, r.team, r.opponent, num1(r.median), `${num1(r.q10)}–${num1(r.q90)}`,
       r.evidence?.[`${statOf(market)}_l3`] != null ? num1(r.evidence[`${statOf(market)}_l3`] as number) : "–"]) },
     notes: [], followups: [`Best ${lc(label)} overs`, `${lc(label)} unders`],
   };

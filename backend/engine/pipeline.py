@@ -107,6 +107,14 @@ def run_props(c, season=2026, log=print) -> dict:
     out = {"walk_forward": rep["run_id"], "promoted": {m: r["gate"]["promoted"] for m, r in rep["markets"].items()}}
     if wk:
         out["projection"] = props.project_week(c, frame, season, wk, log)
+        # Game simulation: re-tested on every backtest week each run; blended in only where it beat the model alone.
+        try:
+            from . import gamesim  # noqa: PLC0415
+            sim = gamesim.run(c, frame, log)
+            out["gamesim"] = {m: r["adopt"] for m, r in sim["markets"].items()}
+            gamesim.attach(c, frame, season, wk, out["projection"]["run_id"], log)
+        except Exception as ex:  # noqa: BLE001 - the site still builds on the model alone
+            log(f"gamesim: skipped ({ex})")
     return out
 
 

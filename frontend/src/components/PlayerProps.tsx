@@ -12,7 +12,7 @@ import { playable } from "@/lib/hitrates";
 import { pOver } from "@/lib/props";
 import { TierBadge } from "@/components/shared";
 import { Card, CardBody, CardHeader, TableWrap, Td, Th } from "@/components/ui";
-import { LineLadder } from "@/pages/Props";
+import { LineLadder, Outlook } from "@/pages/Props";
 
 type MarketMeta = { market: string; label: string; validated: boolean };
 
@@ -50,7 +50,7 @@ export function PlayerProps({ playerId, season, week, feed }: { playerId: string
               <tr className="cursor-pointer border-b border-line/60 hover:bg-raised/40" onClick={() => setOpen(open === x.m.market ? null : x.m.market)}>
                 <Td className="font-medium">{x.m.label}</Td>
                 <Td className="text-right">{x.line}<div className="text-[10px] text-muted">{x.source === "book" ? "book line" : x.source === "projected" ? "projected line" : "usual line"}</div></Td>
-                <Td className="text-right">{num(x.r.median, 1)}<div className="text-[10px] text-muted">{num(x.r.q10, 0)}–{num(x.r.q90, 0)}</div></Td>
+                <Td className="text-right">{num(x.r.median, 1)}</Td>
                 <Td><span className="mr-1.5 font-semibold">{x.lean === "over" ? "Over" : "Under"}</span><TierBadge compact tier={tierFor(conf.data, "props", x.leanP)} /></Td>
                 <Td className="whitespace-nowrap text-right"><span className={cn(x.lean === "under" && "font-semibold text-accent")}>{num((1 - x.over) * 10, 1)}</span>
                   <span className="text-muted"> · </span><span className={cn(x.lean === "over" && "font-semibold text-accent")}>{num(x.over * 10, 1)}</span></Td>
@@ -60,6 +60,7 @@ export function PlayerProps({ playerId, season, week, feed }: { playerId: string
               {open === x.m.market && (
                 <tr className="border-b border-line bg-raised/30"><td colSpan={7} className="px-4 py-3">
                   <div className="sticky left-4 max-w-[calc(100vw-5rem)] sm:max-w-none">
+                    <Outlook r={x.r as never} digits={1} />
                     {!!x.reasons.length && <ul className="mb-3 list-disc space-y-0.5 pl-5 text-sm text-muted">{x.reasons.map((t) => <li key={t}>{t}</li>)}</ul>}
                     <LineLadder r={x.r as never} line={x.line} pl={playable(feed, x.m.market, x.r)} />
                     {!!x.r.recent?.length && <p className="text-xs text-muted">Last {x.r.recent.length} games, newest first: {x.r.recent.map((g) => `${num(g.value, 0)} vs ${g.opponent}`).join(", ")}</p>}

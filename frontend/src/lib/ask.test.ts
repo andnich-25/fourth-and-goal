@@ -59,9 +59,10 @@ describe("ask parser", () => {
     expect(parse(d, "likely scorers").players).toEqual([]); // "likely" is a word here, not Isaiah Likely
   });
 
-  it("picks the best scorer from each game", () => {
+  it("picks the best proven scorer from each game", () => {
+    // DAL at NYG has no 50%+ chance, so that game is left out.
     const a = answer(d, "one TD scorer from each game");
-    expect(a.picks?.map((p) => p.name)).toEqual(["Jahmyr Gibbs", "D'Andre Swift", "George Pickens"]);
+    expect(a.picks?.map((p) => p.name)).toEqual(["Jahmyr Gibbs", "D'Andre Swift"]);
   });
 
   it("limits a one-team question to that team and a matchup to that game", () => {
@@ -167,6 +168,15 @@ describe("ask parser", () => {
   });
 
   it("uses same-game legs when only one game matches", () => {
-    expect(answer(d, "Thursday 2 leg parlay").picks?.length).toBe(2);
+    const thu = { ...d, td: d.td.map((r) => (r.player_id === "4" ? { ...r, p_model: 0.52 } : r)) };
+    expect(answer(thu, "Thursday 2 leg parlay").picks?.length).toBe(2);
+  });
+
+  it("suggests only legs from tiers that hit 50%+ on unseen weeks", () => {
+    const tier = (name: string, lo: number, hi: number, rate: number) => ({ tier: name, lo, hi, n: 200, hits: Math.round(rate * 200), rate, avg_chance: lo, ci: [null, null] as [null, null] });
+    const conf = { td: { tiers: [tier("Long shot", 0, 0.2, 0.09), tier("Lean", 0.2, 0.35, 0.28), tier("Solid", 0.35, 0.5, 0.4), tier("Strong", 0.5, 1, 0.52)] } } as unknown as AskData["conf"];
+    const a = answer({ ...d, conf }, "Safest 3-leg parlay");
+    expect(a.picks?.every((p) => p.p >= 0.5)).toBe(true);
+    expect(a.picks?.map((p) => p.name)).toEqual(["Jahmyr Gibbs", "D'Andre Swift"]);
   });
 });

@@ -23,3 +23,14 @@ export function tierFor(c: Confidence | undefined, kind: "td" | "props", p: numb
 
 export const tierTone = (name?: string) => (name === "Strong" ? "ok" : name === "Solid" ? "accent" : name === "Lean" ? "neutral" : "warn") as
   "ok" | "accent" | "neutral" | "warn";
+
+/** Picks we suggest: only tiers whose past picks hit at least half the time on weeks the model never saw.
+ *  "Coin flip" hovers right at 50%, so it never counts. Without tier data, fall back to the chance itself. */
+export const PROVEN_MIN = 0.5;
+export function proven(c: Confidence | undefined, kind: "td" | "props", p: number | null | undefined): boolean {
+  if (p == null) return false;
+  if (!c) return p >= PROVEN_MIN;
+  const t = tierFor(c, kind, p);
+  return !!t && t.tier !== "Coin flip" && t.rate != null && t.rate >= PROVEN_MIN;
+}
+export const PROVEN_NOTE = "Only picks from confidence tiers that hit 50%+ on unseen weeks (walk-forward backtest) are suggested.";
