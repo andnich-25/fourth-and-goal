@@ -33,8 +33,8 @@ export default function HitRatesPage() {
     <div className="space-y-5">
       <PageTitle kicker={`${season} · Week ${week}`} title="Hit rates" />
       <Notice tone="info" title="Find lines a player keeps clearing">
-        Pick a hit rate and a stretch of games. For each player and market you get the highest line he cleared that often (the lowest for unders), with this week's
-        model chance beside it. A perfect recent record is not a sure thing, so lean on the model's chance and its tier. Open any player on the Player props page to see every line.
+        Pick a hit rate and a stretch of games. Only props the sportsbooks are actually posting this week are listed, at their posted line, with this week's
+        model chance beside it. If a player has no posted line, he is left out. A perfect recent record is not a sure thing, so lean on the model's chance and its tier.
       </Notice>
       <Card>
         <CardHeader icon={<Percent className="h-4 w-4 text-accent" />} title={a?.title ?? "Hit rates"} subtitle={a?.picks ? `${a.picks.length} props, ${sort === "chance" ? "best hit chance first" : "best recent hit rate first"}` : undefined} />

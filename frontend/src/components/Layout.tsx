@@ -53,7 +53,7 @@ const NBA_MOBILE = [NBA_NAV[0], NBA_NAV[3], NBA_NAV[1], NBA_NAV[2]];
 
 /** NFL / NBA switch. Each sport keeps its own pages; the switch goes to that sport's home. */
 function SportSwitch({ nba }: { nba: boolean }) {
-  const base = "rounded-md px-3.5 py-1.5 text-sm font-bold tracking-wide transition-colors";
+  const base = "rounded-md px-2.5 py-1.5 text-sm font-bold tracking-wide transition-colors sm:px-3.5";
   return (
     <div className="flex rounded-lg border border-line bg-surface p-1" role="tablist" aria-label="Sport">
       <NavLink to="/" role="tab" aria-selected={!nba} className={cn(base, !nba ? "bg-accent text-accent-fg" : "text-muted hover:bg-raised hover:text-fg")}>NFL</NavLink>
@@ -206,7 +206,8 @@ export function Layout() {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex h-14 items-center gap-2 sm:gap-3 border-b border-line bg-bg/85 px-3 backdrop-blur sm:px-6">
           <button className="lg:hidden" aria-label="Open menu" onClick={() => setOpen(true)}><Menu className="h-5 w-5" /></button>
-          <div className="lg:hidden"><Logo compact nba={nba} /></div>
+          {/* On phones the NFL/NBA switch stands in for the logo so the header fits. */}
+          <div className="hidden sm:block lg:hidden"><Logo compact nba={nba} /></div>
           <SportSwitch nba={nba} />
           <div className="flex-1" />
           {!nba && <SeasonWeekPicker />}

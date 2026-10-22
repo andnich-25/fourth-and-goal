@@ -131,22 +131,30 @@ describe("ask parser", () => {
     const wr = { player_id: "2", player_name: "Amon-Ra St. Brown", team: "DET", opponent: "TB", position: "WR", game_id: "2026_07_TB_DET", eligible: 1,
       median: 7, q10: 4, q90: 10, recent: rec, evidence: { receptions_med: 7, snap_pct: 0.9 },
       dist: { type: "quantiles" as const, q: Array.from({ length: 99 }, (_, i) => 3 + i * 0.08), platt: [1, 0] as [number, number] } };
-    const dd: AskData = { ...d, props: { receptions: { label: "Receptions", rows: [wr] } } };
+    // Hit rates list only lines a book posts. Here a main line of 5.5 and an alternate 6.5.
+    const feedOf = (rows: { market: string; player_id: string; line: number; alt?: boolean }[]) => {
+      const all = rows.flatMap((r) => (["over", "under"] as const).map((side) => ({ ...r, side, book: "DraftKings", price: -110 })));
+      return { at: "2026-10-22T01:00:00Z", get: (m: string, p: string, s: string) => all.filter((r) => r.market === m && r.player_id === p && r.side === s) };
+    };
+    const noBook: AskData = { ...d, props: { receptions: { label: "Receptions", rows: [wr] } } };
+    expect(answer(noBook, "What props have a 100% hit rate?").title).toContain("need the books");
+    const dd: AskData = { ...noBook, feed: feedOf([{ market: "receptions", player_id: "2", line: 5.5 }, { market: "receptions", player_id: "2", line: 6.5, alt: true }]) };
     const a = answer(dd, "What props have a 100% hit rate?");
     expect(a.picks?.[0].label).toBe("Over 5.5 receptions");
     expect(a.picks?.[0].reasons?.[0]).toContain("8 of 8");
     const b = answer(dd, "what props hit 60% of the time");
     expect(b.picks?.[0].label).toBe("Over 6.5 receptions");
     const l = answer(dd, "St. Brown alt lines receptions");
-    expect(l.table?.rows.some((r) => String(r[0]) === "5.5" && String(r[3]).startsWith("8 of 8"))).toBe(true);    // Only lines a book would offer: a QB with one 54-yard game has no 100% passing-yards line, never "over 50.5".
+    expect(l.table?.rows.some((r) => String(r[0]).startsWith("5.5") && String(r[3]).startsWith("8 of 8"))).toBe(true);    // Only lines a book would offer: a QB with one 54-yard game has no 100% passing-yards line, never "over 50.5".
     const qrec = [281, 329, 291, 287, 361, 266, 54, 191].map((v, i) => ({ season: 2026, week: 6 - i, opponent: "TB", value: v }));
     const qb = { player_id: "9", player_name: "Bryce Young", team: "CAR", opponent: "TB", position: "QB", game_id: "2026_07_TB_CAR", eligible: 1,
       median: 241, q10: 147, q90: 327, recent: qrec, evidence: { pass_yards_med: 284, attempts_pg: 33, snap_pct: 1 },
       dist: { type: "quantiles" as const, q: Array.from({ length: 99 }, (_, i) => 120 + i * 2.4), platt: [1, 0] as [number, number] } };
-    const qd: AskData = { ...d, props: { pass_yards: { label: "Passing yards", rows: [qb] } } };
+    const qd: AskData = { ...d, props: { pass_yards: { label: "Passing yards", rows: [qb] } }, feed: feedOf([{ market: "pass_yards", player_id: "9", line: 230.5 }]) };
     expect(answer(qd, "What props have a 100% hit rate?").picks ?? []).toHaveLength(0);
-    const q90 = answer(qd, "what props have a 80% hit rate");
-    expect(q90.picks?.[0].line).toBeGreaterThanOrEqual(169);
+    expect(answer(qd, "what props have a 70% hit rate").picks?.[0].line).toBe(230.5);
+    // A player the books don't post is never listed, however often he cleared some line.
+    expect(answer({ ...qd, feed: feedOf([]) }, "what props have a 70% hit rate").picks ?? []).toHaveLength(0);
     const lad = answer(qd, "Bryce Young passing yards alt lines");
     expect(lad.table?.rows.every((r) => parseFloat(String(r[0])) >= 168)).toBe(true);
   });

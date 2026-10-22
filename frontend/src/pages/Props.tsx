@@ -163,6 +163,7 @@ export default function PropsPage() {
           : sort === "name" ? a.r.player_name.localeCompare(b.r.player_name)
             : (b.leanP ?? -1) - (a.leanP ?? -1) || b.r.median - a.r.median));
   const hasActual = d?.rows.some((x) => x.actual != null);
+  const propName = (m?.label ?? market).toLowerCase();
 
   return (
     <div className="space-y-5">
@@ -204,7 +205,7 @@ export default function PropsPage() {
               <thead><tr>
                 <Th>Player</Th><Th>Opp</Th><Th className="text-right" title="Middle of the projected range: half of outcomes above, half below">Projection</Th>
                 <Th className="text-right" title="80% of outcomes should land in this range">10–90%</Th>
-                <Th>Line</Th><Th title="Confidence out of 10 for each side. They add to 10; the bigger one is the lean.">Under · Over (out of 10)</Th><Th>Lean</Th>
+                <Th>{m?.label ?? "Line"} line</Th><Th title="Confidence out of 10 for each side. They add to 10; the bigger one is the lean.">Under · Over (out of 10)</Th><Th>Lean</Th>
                 <Th title="Optional: American odds for the lean side. Filled with the best book price when prices are loaded.">Price</Th>
                 <Th className="text-right" title="Our chance of the lean side minus the book's implied chance (which includes the book's margin)">vs book</Th>
                 {hasActual && <Th className="text-right">Result</Th>}<Th />
@@ -233,7 +234,7 @@ export default function PropsPage() {
                           {source !== "yours" && <div className="mt-0.5 text-[10px] text-muted">{source === "book" ? "book line" : source === "projected" ? "projected line" : "usual line"}</div>}
                         </Td>
                         <Td>{over != null ? <ConfidenceSplit over={over} /> : r.dist ? <span className="text-muted">—</span> : <span className="text-xs text-muted" title="Not validated">hidden</span>}</Td>
-                        <Td>{lean ? <div className="flex items-center gap-1.5 whitespace-nowrap"><span className="font-semibold">{lean === "under" ? "Under" : "Over"} {line}</span>{r.eligible ? <TierBadge tier={tier} compact /> : null}</div> : <span className="text-muted">—</span>}</Td>
+                        <Td>{lean ? <div className="flex items-center gap-1.5 whitespace-nowrap"><span className="font-semibold">{lean === "under" ? "Under" : "Over"} {line} <span className="font-normal">{propName}</span></span>{r.eligible ? <TierBadge tier={tier} compact /> : null}</div> : <span className="text-muted">—</span>}</Td>
                         <Td><Input aria-label={`Price for ${r.player_name}`} placeholder="-110" value={odds ?? ""} disabled={!lean}
                           onChange={(e) => setLines({ ...lines, [k]: { ...typed, odds: e.target.value } })} className="h-8 w-20" /></Td>
                         <Td className={cn("text-right", edge != null && (edge > 0 ? "text-accent" : "text-danger"))}>{edge != null ? `${edge > 0 ? "+" : ""}${Math.round(edge * 100)} pts` : <span className="text-muted">—</span>}</Td>
@@ -247,7 +248,7 @@ export default function PropsPage() {
                           <div className="sticky left-4 max-w-[calc(100vw-5rem)] sm:max-w-none">
                           {lean && (
                             <div className="mb-3">
-                              <div className="text-sm font-semibold">Why it leans {lean} {line}</div>
+                              <div className="text-sm font-semibold">Why it leans {lean} {line} {propName}</div>
                               {reasons.length ? <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-muted">{reasons.map((t) => <li key={t}>{t}</li>)}</ul>
                                 : <p className="mt-1 text-sm text-muted">No single factor stands out; the lean comes from the model weighing everything below together.</p>}
                             </div>

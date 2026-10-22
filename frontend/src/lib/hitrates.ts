@@ -29,6 +29,13 @@ export function playable(feed: Feed | undefined, market: string, r: HitRow): Pla
   }
   return { lines: null, anchor: main ?? Math.floor(r.median) + 0.5, source: "estimated" };
 }
+/** Every line any loaded book posts for this player and market (main and alternate), lowest first. */
+export function bookLines(feed: Feed, market: string, playerId: string, side?: "over" | "under"): number[] {
+  const lines = new Set<number>();
+  for (const s of side ? [side] : ["over", "under"]) for (const o of feed.get(market, playerId, s)) if (o.line != null) lines.add(o.line);
+  return [...lines].sort((a, b) => a - b);
+}
+
 export function band(anchor: number): [number, number] {
   const w = Math.max(anchor <= 30 ? 2 : 0, 0.3 * anchor);
   return [Math.max(0.5, anchor - w), anchor + w];

@@ -10,7 +10,7 @@ import { simulate, type Buckets, type SimLeg } from "@/lib/sim";
 import type { RankingRow } from "@/lib/types";
 import { dueOf, type Due, type DueBin } from "@/lib/signals";
 import { likelyToPlay, starterQbs } from "@/lib/playing";
-import { ladder, lineAtRate, playable, rung } from "@/lib/hitrates";
+import { bookLines, ladder, lineAtRate, playable } from "@/lib/hitrates";
 
 export type Recent = { season: number; week: number; opponent: string; value: number };
 export type PropRow = { player_id: string; player_name: string; team: string; opponent: string; position: string; game_id: string; eligible: number;
@@ -635,42 +635,42 @@ export function toSim(p: Pick): SimLeg {
 const frac = (h: number, n: number) => `${h} of ${n}`;
 export const PLAYABLE_NOTE = "Only lines a book would realistically offer are used: about 30% either side of the main book line (or this week's projection until lines are loaded), where alternate lines usually stop. Exact alternate lines replace this estimate when they are pulled.";
 
-/** Props a player has cleared in (nearly) every recent game: the highest line he cleared at the threshold, per market. */
+/** Props a player has cleared in (nearly) every recent game, only at lines a sportsbook actually posts for him: the
+ *  highest posted line he cleared at the threshold (lowest for unders), per market. A player or market with no posted
+ *  line is left out, so nothing is listed that can't be bet. */
 export function answerHitRates(d: AskData, n: number, f: Filters, o: { threshold?: number; window?: number; side?: "over" | "under"; markets?: string[] } = {}): Answer {
   const threshold = o.threshold ?? 1, window = o.window ?? 8, sides = o.side ? [o.side] : (["over"] as const);
   const all: Pick[] = [];
-  let anyBook = false;
+  let anyAlt = false;
   for (const m of o.markets ?? Object.keys(d.props)) {
     for (const r of d.props[m]?.rows ?? []) {
       if (!r.eligible || !r.dist || !propPlays(d, r, m)) continue;
       if (!keep(d, f, { pos: r.position, team: r.team, opp: r.opponent, game_id: r.game_id })) continue;
       for (const side of sides) {
-        const pl = playable(d.feed, m, r);
-        if (pl.source === "book") anyBook = true;
-        const x = lineAtRate(r, side, threshold, window, 5, pl);
+        const lines = bookLines(d.feed, m, r.player_id, side);
+        if (!lines.length) continue;
+        if (playable(d.feed, m, r).source === "book") anyAlt = true;
+        const x = lineAtRate(r, side, threshold, window, 5, { lines, anchor: lines[0], source: "book" });
         if (!x) continue;
-        // Skip lines nobody bets (a 0.5 over for a player whose typical game is far above it).
-        if (side === "over" && x.line < 1 && r.median > 3) continue;
         const pk = propPick(d, m, r, x.line, side);
         const h = side === "over" ? x.hits : x.games - x.hits, h5 = side === "over" ? x.hits5 : x.games5 - x.hits5;
-        const book = feedLine(d.feed, m, r.player_id);
-        const atBook = book != null ? rung(r, book, window) : null;
-        all.push({ ...pk, lineSource: undefined, reasons: [
+        all.push({ ...pk, lineSource: "book", reasons: [
           `${side === "over" ? "Over" : "Under"} ${x.line} in ${frac(h, x.games)} of his last ${x.games} games (last 5: ${frac(h5, x.games5)})`,
           `Recent games: ${(r.recent ?? []).slice(0, window).map((g) => num1(g.value)).join(", ")}`,
-          ...(atBook ? [`At the book line ${book}: over in ${frac(atBook.hits, atBook.games)}, model ${pct(atBook.over ?? 0)} over`] : [])] });
+          pk.price != null ? `Posted at ${fmtPrice(pk.price)} (${pk.book})` : "Posted by the books this week"] });
       }
     }
   }
   const picks = all.sort((a, b) => b.p - a.p);
   const label = `${Math.round(threshold * 100)}%`;
-  if (!picks.length) return none(d, `No props at a ${label} hit rate over the last ${window} games`, f);
+  if (!d.feed.at) return { title: "Hit rates need the books' lines", summary: "Only props the sportsbooks actually post are listed, and no book lines are loaded for this week yet. They are pulled Saturday morning.", notes: [], followups: ["Who is due for a TD?", "Safest pick, any prop"] };
+  if (!picks.length) return none(d, `No posted props at a ${label} hit rate over the last ${window} games`, f);
   return {
     title: `Props at a ${label} hit rate (last ${window} games)${describe(f) ? ` (${describe(f)})` : ""}`,
-    summary: `${picks.length} player props where he cleared the line in at least ${label} of his last ${window} games, at the highest line that holds. Highest model chance first: a perfect recent record does not mean a sure thing, so the model's chance for this week is shown beside each.`,
+    summary: `${picks.length} props the books are posting this week where he cleared the line in at least ${label} of his last ${window} games${anyAlt ? ", at the highest posted line that holds" : ""}. Highest model chance first: a perfect recent record does not mean a sure thing, so the model's chance for this week is shown beside each.`,
     picks: picks.slice(0, n), notes: [
       picks.length > n ? `Showing ${n} of ${picks.length}. Narrow it with a market, position or team, or ask for more.` : "",
-      anyBook ? "Lines are the ones the books post, alternate lines included." : PLAYABLE_NOTE,
+      anyAlt ? "Lines are the ones the books post, alternate lines included." : "Lines are the main lines the books post (alternate lines need a paid odds plan). Players and markets without a posted line are left out.",
       "Hit rates count games he played. Open a player on the Hit rates page to see every line.", ...priceNote(d)].filter(Boolean),
     followups: ["Props at a 90% hit rate", "Unders at a 100% hit rate last 5", "Best value bets"],
   };
