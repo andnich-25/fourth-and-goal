@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answer, parse, type AskData } from "./ask";
+import { answer, anyPool, parse, type AskData } from "./ask";
 import type { RankingRow } from "./types";
 
 const row = (id: string, name: string, team: string, opp: string, pos: string, p: number, gid: string, day = "2026-10-25"): RankingRow =>
@@ -34,6 +34,15 @@ describe("ask parser", () => {
     ["Who will fall short this week?", "unders"],
     ["best unders for receivers", "unders"],
     ["who is due for a TD", "due"],
+    ["What props have a 100% hit rate?", "hitrate"],
+    ["unders that hit 90% of the time last 5", "hitrate"],
+    ["who is on a hot streak", "hitrate"],
+    ["worst defenses against running backs", "defense"],
+    ["best matchups for WRs this week", "defense"],
+    ["highest scoring games this week", "games"],
+    ["what does edge mean", "glossary"],
+    ["what is a tier", "glossary"],
+    ["most projected receiving yards", "leaders"],
     ["What is the safest pick from all 14 games. It can be any prop", "any"],
     ["best bets this week any market", "any"],
     ["give me the highest rated prop from each game", "pergame"],
@@ -73,7 +82,11 @@ describe("ask parser", () => {
     expect(answer(withProps, "safest pick from each game").title).toContain("any market");
     expect(answer(withProps, "give me the highest rated prop from each game").title).toContain("any market");
     expect(answer(withProps, "best prop from each game, no TDs").picks?.every((p) => p.market !== "td")).toBe(true);
-    expect(answer(d, "one TD scorer from each game").title).toContain("TD scorer");
+    expect(answer(d, "one TD scorer from each game").title).toContain("TD scorer");    // The parlay builder's "All markets" list keeps every leg, not just each player's best one.
+    const every = anyPool(withProps, {}, undefined, false);
+    expect(every.filter((p) => p.player_id === "2").map((p) => p.market).sort()).toEqual(["receptions", "td"]);
+    expect(anyPool(withProps).filter((p) => p.player_id === "2")).toHaveLength(1);
+    expect(every.map((p) => p.p)).toEqual([...every.map((p) => p.p)].sort((a, b) => b - a));
   });
 
   it("leaves out backup quarterbacks and players without a real role", () => {
@@ -86,6 +99,41 @@ describe("ask parser", () => {
     expect(names).toContain("Starter Qb");
     expect(names).not.toContain("Backup Qb");
     expect(names).not.toContain("Deep Reserve");
+  });
+
+  it("explains why a pick leans the way it does", () => {
+    const henry = { player_id: "h", player_name: "Hunter Henry", team: "NE", opponent: "CHI", position: "TE", game_id: "2026_07_NE_CHI", eligible: 1,
+      median: 3.6, q10: 1, q90: 6, recent: [2, 3, 5, 2, 3, 4, 1, 6].map((v, i) => ({ season: 2026, week: 6 - i, opponent: "BUF", value: v })),
+      evidence: { receptions_med: 4, receptions_l3: 3.3, receptions_cur: 3.5, opp_receptions_mult: 0.85, targets_pg: 5.1, snap_pct: 0.8, team_implied_total: 19.5 },
+      dist: { type: "quantiles" as const, q: Array.from({ length: 99 }, (_, i) => 0.5 + i * 0.065), platt: [1, 0] as [number, number] } };
+    const dd: AskData = { ...d, props: { receptions: { label: "Receptions", rows: [henry] } } };
+    const p = parse(dd, "Why is it suggesting Hunter Henry's under?");
+    expect(p.intent).toBe("why");
+    const a = answer(dd, "Why is it suggesting Hunter Henry's under?");
+    expect(a.picks?.[0].side).toBe("under");
+    expect(a.picks?.[0].reasons?.some((r) => r.includes("CHI allows 15% fewer"))).toBe(true);
+    expect(a.notes.some((n) => n.startsWith("Projection 3.6"))).toBe(true);
+    expect(a.notes.some((n) => n.includes("Last 8 games"))).toBe(true);
+  });
+
+  it("builds parlays from every market unless TDs are asked for", () => {
+    expect(answer(d, "Give me the best 3 leg parlay for tonights game").title).toContain("any market");
+    expect(answer(d, "3 leg TD parlay").title).toContain("TD parlay");
+  });
+
+  it("finds props at a hit rate and builds a player's ladder", () => {
+    const rec = [6, 7, 8, 6, 9, 7, 6, 10].map((v, i) => ({ season: 2026, week: 6 - i, opponent: "BUF", value: v }));
+    const wr = { player_id: "2", player_name: "Amon-Ra St. Brown", team: "DET", opponent: "TB", position: "WR", game_id: "2026_07_TB_DET", eligible: 1,
+      median: 7, q10: 4, q90: 10, recent: rec, evidence: { receptions_med: 7, snap_pct: 0.9 },
+      dist: { type: "quantiles" as const, q: Array.from({ length: 99 }, (_, i) => 3 + i * 0.08), platt: [1, 0] as [number, number] } };
+    const dd: AskData = { ...d, props: { receptions: { label: "Receptions", rows: [wr] } } };
+    const a = answer(dd, "What props have a 100% hit rate?");
+    expect(a.picks?.[0].label).toBe("Over 5.5 receptions");
+    expect(a.picks?.[0].reasons?.[0]).toContain("8 of 8");
+    const b = answer(dd, "what props hit 60% of the time");
+    expect(b.picks?.[0].label).toBe("Over 6.5 receptions");
+    const l = answer(dd, "St. Brown alt lines receptions");
+    expect(l.table?.rows.some((r) => String(r[0]) === "5.5" && String(r[3]).startsWith("8 of 8"))).toBe(true);
   });
 
   it("flags due players from expected vs actual TDs", () => {

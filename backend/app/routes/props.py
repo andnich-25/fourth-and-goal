@@ -67,7 +67,7 @@ def week_props(season: int | None = None, week: int | None = None, market: str =
             "note": NO_LINES_NOTE}
 
 
-def _recent(c, season: int, week: int, stat: str, n: int = 8) -> dict:
+def _recent(c, season: int, week: int, stat: str, n: int = 16) -> dict:
     """Each player's last n games before the target week, most recent first (context for the reader, not a model input)."""
     h = props.load_history(c)
     h = h[(h.season < season) | ((h.season == season) & (h.week < week))]

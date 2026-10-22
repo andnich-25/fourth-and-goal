@@ -1,0 +1,48 @@
+import * as React from "react";
+import { Percent } from "lucide-react";
+import { answerHitRates } from "@/lib/ask";
+import { useLinkSuffix, useSeasonWeek } from "@/lib/state";
+import { PageTitle } from "@/components/Layout";
+import { Card, CardBody, CardHeader, Input, LoadingBlock, Notice, Segmented, Select } from "@/components/ui";
+import { PickList, useAskData } from "./Ask";
+
+const POSITIONS = ["All", "QB", "RB", "WR", "TE"];
+
+export default function HitRatesPage() {
+  const { season, week } = useSeasonWeek();
+  const suffix = useLinkSuffix();
+  const { data } = useAskData(season, week);
+  const [threshold, setThreshold] = React.useState(1);
+  const [win, setWin] = React.useState(8);
+  const [side, setSide] = React.useState<"over" | "under">("over");
+  const [market, setMarket] = React.useState("all");
+  const [pos, setPos] = React.useState("All");
+  const [team, setTeam] = React.useState("");
+  const a = React.useMemo(() => data ? answerHitRates(data, 300, { position: pos === "All" ? undefined : pos, teams: team ? [team.toUpperCase()] : undefined },
+    { threshold, window: win, side, markets: market === "all" ? undefined : [market] }) : null, [data, threshold, win, side, market, pos, team]);
+  return (
+    <div className="space-y-5">
+      <PageTitle kicker={`${season} · Week ${week}`} title="Hit rates" />
+      <Notice tone="info" title="Find lines a player keeps clearing">
+        Pick a hit rate and a stretch of games. For each player and market you get the highest line he cleared that often (the lowest for unders), with this week's
+        model chance beside it. A perfect recent record is not a sure thing, so lean on the model's chance and its tier. Open any player on the Player props page to see every line.
+      </Notice>
+      <Card>
+        <CardHeader icon={<Percent className="h-4 w-4 text-accent" />} title={a?.title ?? "Hit rates"} subtitle={a?.picks ? `${a.picks.length} props, highest model chance first` : undefined} />
+        <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2 sm:px-5">
+          <Segmented size="sm" label="Hit rate" value={threshold} onChange={setThreshold} options={[1, 0.9, 0.8, 0.7].map((x) => ({ value: x, label: `${Math.round(x * 100)}%` }))} />
+          <Segmented size="sm" label="Games" value={win} onChange={setWin} options={[5, 8, 16].map((x) => ({ value: x, label: `Last ${x}` }))} />
+          <Segmented size="sm" label="Side" value={side} onChange={setSide} options={[{ value: "over", label: "Overs" }, { value: "under", label: "Unders" }]} />
+          <Select aria-label="Market" value={market} onChange={(e) => setMarket(e.target.value)} className="h-8 w-44 text-xs">
+            <option value="all">All markets</option>
+            {Object.entries(data?.props ?? {}).map(([m, v]) => <option key={m} value={m}>{v.label}</option>)}
+          </Select>
+          <Segmented size="sm" label="Position" value={pos} onChange={setPos} options={POSITIONS.map((x) => ({ value: x, label: x }))} />
+          <Input aria-label="Team" placeholder="Team (e.g. DET)" value={team} onChange={(e) => setTeam(e.target.value.slice(0, 3))} className="h-8 w-32 text-xs" />
+        </div>
+        {!data ? <LoadingBlock rows={6} className="p-5" /> : a?.picks?.length ? <PickList picks={a.picks} suffix={suffix} />
+          : <CardBody className="text-sm text-muted">{a?.summary ?? "Nothing matches."}</CardBody>}
+      </Card>
+    </div>
+  );
+}

@@ -26,6 +26,7 @@ import NbaAsk from "./pages/nba/NbaAsk";
 import NbaPlayer from "./pages/nba/NbaPlayer";
 import NbaRecord from "./pages/nba/NbaRecord";
 import NbaHow from "./pages/nba/NbaHow";
+import HitRates from "./pages/HitRates";
 import { EmptyState } from "./components/ui";
 import { STATIC } from "./lib/api";
 
@@ -49,6 +50,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Route path="builder" element={<Builder />} />
               <Route path="ask" element={<Ask />} />
               <Route path="props" element={<Props />} />
+              <Route path="hitrates" element={<HitRates />} />
               <Route path="trends" element={<Trends />} />
               <Route path="defenses" element={<Defenses />} />
               <Route path="defenses/:team" element={<DefenseDetail />} />

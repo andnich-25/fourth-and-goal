@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { cn, num, pct } from "@/lib/format";
 import { useConfidence } from "@/lib/confidence";
 import { useFeed } from "@/lib/feed";
-import { answer, EXAMPLES, fmtPrice, gameLabel, american, type Answer, type AskData, type Pick, type PropRow } from "@/lib/ask";
+import { answer, EXAMPLES, fmtPrice, slipLeg, gameLabel, american, type Answer, type AskData, type Pick, type PropRow } from "@/lib/ask";
 import { loadKey, MODEL, saveKey } from "@/lib/aiKey";
 import type { AiTurn } from "@/lib/askAi";
 import type { Buckets } from "@/lib/sim";
@@ -186,6 +186,14 @@ function AnswerView({ a, data, onAsk, season, week }: { a: Answer; data: AskData
             <span className="font-semibold">{num(p.median, 1)}</span><span className="text-xs text-muted">{num(p.range[0], 0)}–{num(p.range[1], 0)}</span>
           </li>))}</ul>
       )}
+      {a.table && (
+        <div className="overflow-x-auto border-t border-line">
+          <table className="w-full text-sm"><thead><tr className="text-left text-[11px] uppercase tracking-wide text-muted">
+            {a.table.columns.map((c, i) => <th key={c} className={cn("whitespace-nowrap px-4 py-2 font-medium sm:px-5", i > 0 && "text-right")}>{c}</th>)}</tr></thead>
+            <tbody>{a.table.rows.map((r, i) => (
+              <tr key={i} className="border-t border-line/60">{r.map((v, j) => <td key={j} className={cn("whitespace-nowrap px-4 py-1.5 sm:px-5", j > 0 ? "text-right" : "font-medium")}>{v}</td>)}</tr>))}</tbody></table>
+        </div>
+      )}
       <CardBody className="space-y-3">
         {a.notes.length > 0 && <ul className="space-y-1 text-xs text-muted">{a.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
         <div className="flex flex-wrap gap-2">
@@ -218,6 +226,9 @@ export function PickList({ picks, suffix }: { picks: Pick[]; suffix: string }) {
               {p.note && <Badge tone="warn">{p.note}</Badge>}
             </div>
             {p.reasons && p.reasons.length > 0 && <ul className="mt-1 space-y-0.5 text-xs text-muted">{p.reasons.map((r) => <li key={r}>• {r}</li>)}</ul>}
+            {p.against && p.against.length > 0 && (
+              <div className="mt-1 text-xs text-muted"><span className="font-medium text-fg">Working against it:</span>
+                <ul className="mt-0.5 space-y-0.5">{p.against.map((r) => <li key={r}>• {r}</li>)}</ul></div>)}
           </div>
           <div className="text-right">
             <div className="font-display text-lg font-semibold">{pct(p.p, 0)}</div>
@@ -227,13 +238,6 @@ export function PickList({ picks, suffix }: { picks: Pick[]; suffix: string }) {
       ))}
     </ul>
   );
-}
-
-function slipLeg(d: AskData, p: Pick) {
-  const prices: Record<string, string> = {};
-  for (const r of d.feed.get(p.market, p.player_id, p.side)) if (p.market === "td" || r.line === p.line) prices[r.book] = fmtPrice(r.price);
-  return { id: p.id, market: p.market, player_id: p.player_id, team: p.team, position: p.pos, game_id: p.game_id, p: p.p, side: p.side, name: p.name,
-    opponent: p.opp, label: p.market === "td" ? "Anytime TD" : d.props[p.market]?.label ?? p.market, line: p.line, dist: p.dist, recent: p.recent, prices };
 }
 
 function KeyPanel({ keyValue, onSave }: { keyValue: string; onSave: (k: string) => void }) {

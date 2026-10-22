@@ -9,10 +9,12 @@ import { feedLine, useFeed, type Feed } from "@/lib/feed";
 import { TierBadge } from "@/components/shared";
 import { MARKET_GROUPS, pOver, type PropDist } from "@/lib/props";
 import { bestPrice, coHits, simulate, toAmerican, toDecimal, type Buckets, type SimLeg } from "@/lib/sim";
+import { anyPool, slipLeg, type Pick } from "@/lib/ask";
 import { csv, saveCsv } from "@/lib/static";
 import { useLinkSuffix, useSeasonWeek } from "@/lib/state";
 import type { RankingRow, RankingsResponse, Top3Response } from "@/lib/types";
 import { PageTitle } from "@/components/Layout";
+import { useAskData } from "@/pages/Ask";
 import { Badge, Button, Card, CardBody, CardHeader, ErrorState, Input, LoadingBlock, Notice, PosBadge, Segmented, Select, TableWrap, Td, TeamBadge, Th } from "@/components/ui";
 
 const BOOKS = ["DraftKings", "FanDuel", "BetMGM", "Caesars", "BetRivers", "Fanatics"];
@@ -61,8 +63,9 @@ function propLeg(r: PropRow, market: string, label: string, line: number, side: 
 const legText = (l: SlipLeg) => (l.market === "td" ? "Anytime TD" : `${l.side === "over" ? "Over" : "Under"} ${l.line} ${l.label.toLowerCase()}`);
 const recentHits = (l: SlipLeg) => {
   if (l.market === "td" || l.line == null || !l.recent?.length) return null;
-  const hits = l.recent.filter((g) => (l.side === "over" ? g.value > (l.line as number) : g.value < (l.line as number))).length;
-  return { hits, games: l.recent.length };
+  const rec = l.recent.slice(0, 8);
+  const hits = rec.filter((g) => (l.side === "over" ? g.value > (l.line as number) : g.value < (l.line as number))).length;
+  return { hits, games: rec.length };
 };
 
 export default function BuilderPage() {
@@ -135,7 +138,7 @@ function Build({ model, ranks, season, week }: { model?: ParlayModel; ranks?: Ra
   return (
     <>
       <Notice tone="info" title="How this works">
-        Add legs from the anytime-TD model or from validated prop markets (type the book's line). Each leg's chance comes from a model that beat
+        Add legs from every validated market at once (All markets, best chance first), or pick one market and type the book's line. Each leg's chance comes from a model that beat
         baselines on unseen weeks. The slip is then simulated 40,000 times: legs in different games are independent, legs in the same game move
         together the way they have in past games. Type each book's price and the best one is used. Nothing here is a sure thing.
       </Notice>
@@ -257,7 +260,9 @@ function Picker({ ranks, season, week, slip, add, buckets, useCorr, setSlip, fee
   setSlip: (s: SlipLeg[]) => void; feed: Feed;
 }) {
   const suffix = useLinkSuffix();
-  const [source, setSource] = React.useState("td");
+  const [source, setSource] = React.useState("all");
+  const ask = useAskData(season, week);
+  const conf = useConfidence();
   const [search, setSearch] = React.useState("");
   const [lines, setLines] = React.useState<Record<string, { line?: string; odds?: string }>>(() => load(LINES_KEY, {}));
   React.useEffect(() => store(LINES_KEY, lines), [lines]);
@@ -270,7 +275,7 @@ function Picker({ ranks, season, week, slip, add, buckets, useCorr, setSlip, fee
   const markets = useQuery({ queryKey: ["props-markets"], queryFn: () => api.get<{ markets: MarketMeta[] }>("/props/markets") });
   const validated = (markets.data?.markets ?? []).filter((x) => x.validated);
   const meta = validated.find((x) => x.market === source);
-  const props = useQuery({ queryKey: ["props", season, week, source], enabled: source !== "td",
+  const props = useQuery({ queryKey: ["props", season, week, source], enabled: source !== "td" && source !== "all",
     queryFn: () => api.get<PropsResp>("/props", { season, week, market: source }) });
   const inSlip = new Set(slip.map((l) => l.id));
   const q = search.toLowerCase();
@@ -278,6 +283,12 @@ function Picker({ ranks, season, week, slip, add, buckets, useCorr, setSlip, fee
   const tdRows = (ranks?.rows ?? []).filter((r) => r.p_model != null && r.game_id && posOk(r.position) && (!q || r.player_name.toLowerCase().includes(q)))
     .sort((a, b) => (b.p_model as number) - (a.p_model as number));
   const propRows = (props.data?.rows ?? []).filter((r) => r.eligible && r.dist && posOk(r.position) && (!q || r.player_name.toLowerCase().includes(q)));
+  // "All": every validated leg in every market (anytime TD plus the likelier side of each prop), best chance first.
+  // Same pool and filters as Ask's any-market answers: only players expected to play, book lines once loaded, otherwise
+  // the usual line where it sits near this week's projection.
+  const allPicks = React.useMemo(() => (ask.data ? anyPool(ask.data, pos === "All" ? {} : { position: pos }, undefined, false) : []), [ask.data, pos]);
+  const allRows = allPicks.filter((p) => !q || p.name.toLowerCase().includes(q));
+  const pickLeg = (p: Pick) => slipLeg(ask.data!, p) as SlipLeg;
   const lineKey = (r: PropRow) => `${season}-${week}-${source}-${r.player_id}`;
   const lineOf = (r: PropRow) => lines[lineKey(r)]?.line ?? (feedLine(feed, source, r.player_id)?.toString() ?? "");
 
@@ -290,6 +301,7 @@ function Picker({ ranks, season, week, slip, add, buckets, useCorr, setSlip, fee
   };
   const candidates = (): SlipLeg[] => {
     if (source === "td") return goal === "likely" ? tdRows.slice(0, 30).map(tdLeg) : tdRows.map(tdLeg);
+    if (source === "all") return goal === "likely" ? allRows.filter((p) => p.p >= 0.5).slice(0, 40).map(pickLeg) : allRows.map(pickLeg);
     if (!meta) return [];
     const out: SlipLeg[] = [];
     for (const r of propRows) {
@@ -321,7 +333,7 @@ function Picker({ ranks, season, week, slip, add, buckets, useCorr, setSlip, fee
       chosen.push(bestLeg);
       current = bestScore;
     }
-    const noLines = source !== "td" && !candidates().length && !propRows.some((r) => lineOf(r) !== "");
+    const noLines = source !== "td" && source !== "all" && !candidates().length && !propRows.some((r) => lineOf(r) !== "");
     setSuggestNote(chosen.length ? "" : noLines ? "No book lines for this market yet: type a line next to the players you want, or wait for the Saturday price pull."
       : goal === "value" ? (feed.at ? "No leg in this market beats the best sportsbook price by 3+ points right now."
         : "Best value needs sportsbook prices, and none have been fetched for this week yet.")
@@ -334,6 +346,7 @@ function Picker({ ranks, season, week, slip, add, buckets, useCorr, setSlip, fee
       <CardBody className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <Select aria-label="Market" value={source} onChange={(e) => setSource(e.target.value)} className="w-48">
+            <option value="all">All markets</option>
             <option value="td">Anytime TD</option>
             {MARKET_GROUPS.map((g) => {
               const opts = validated.filter((x) => g.markets.includes(x.market));
@@ -355,14 +368,31 @@ function Picker({ ranks, season, week, slip, add, buckets, useCorr, setSlip, fee
             {[2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}</Select>
           <span>legs</span>
           <label className="flex items-center gap-1 text-xs text-muted"><input type="checkbox" checked={sameGameOk} onChange={(e) => setSameGameOk(e.target.checked)} />same game allowed</label>
-          <Button size="sm" variant="primary" onClick={suggest} disabled={source === "td" ? !tdRows.length : !propRows.length}>Suggest</Button>
+          <Button size="sm" variant="primary" onClick={suggest} disabled={source === "td" ? !tdRows.length : source === "all" ? !allRows.length : !propRows.length}>Suggest</Button>
           <span className="w-full text-xs text-muted">
-            Picks only from {source === "td" ? "anytime TDs" : `${meta?.label.toLowerCase() ?? "this market"} (players with a line)`}{pos !== "All" ? `, ${pos}s only` : ""}.{" "}
+            Picks only from {source === "all" ? "every market" : source === "td" ? "anytime TDs" : `${meta?.label.toLowerCase() ?? "this market"} (players with a line)`}{pos !== "All" ? `, ${pos}s only` : ""}.{" "}
             {goal === "likely" ? "Most likely is not the same as best value." : "Best value: only legs our chance beats the best book price by 3+ points, combined for the highest expected return."}
           </span>
           {suggestNote && <span className="w-full text-xs text-warn">{suggestNote}</span>}
         </div>
-        {source === "td" ? (
+        {source === "all" ? (
+          !ask.data ? <LoadingBlock rows={6} /> : !allRows.length ? <div className="text-sm text-muted">No legs match.</div> : <>
+            <p className="text-xs text-muted">{allRows.length} legs across every market, best chance first. Props use the book line once prices are loaded; until then, the player's usual line (marked "usual"), so check the book's line before betting.</p>
+            <TableWrap className="max-h-[560px] overflow-y-auto">
+              <table className="w-full"><thead className="sticky top-0 bg-surface"><tr><Th>Player</Th><Th>Bet</Th><Th className="text-right">Chance</Th><Th /></tr></thead>
+                <tbody>{allRows.slice(0, 300).map((p) => (
+                  <tr key={p.id} className="border-b border-line/60">
+                    <Td><div className="flex items-center gap-2"><span className="hidden sm:inline-flex"><TeamBadge team={p.team} /></span><PosBadge pos={p.pos} /><Link className="whitespace-normal hover:text-accent" to={`/players/${p.player_id}${suffix}`}>{p.name}</Link></div>
+                      <div className="text-xs text-muted">vs {p.opp}</div></Td>
+                    <Td className="whitespace-normal">{p.label}
+                      {p.lineSource === "usual" && <span className="ml-1 text-xs text-muted">(usual)</span>}</Td>
+                    <Td className="text-right"><div className="font-semibold">{pct(p.p, 0)}</div><TierBadge compact tier={tierFor(conf.data, p.kind, p.kind === "td" ? p.p : Math.max(p.p, 1 - p.p))} /></Td>
+                    <Td className="text-right"><Button size="sm" variant="outline" disabled={inSlip.has(p.id)} onClick={() => add(pickLeg(p))}><Plus className="h-3.5 w-3.5" />Add</Button></Td>
+                  </tr>))}</tbody></table>
+            </TableWrap>
+            {allRows.length > 300 && <p className="text-xs text-muted">Showing the top 300. Search a name or pick a position to see the rest.</p>}
+          </>
+        ) : source === "td" ? (
           !ranks ? <LoadingBlock rows={6} /> : !tdRows.length ? <div className="text-sm text-muted">No validated anytime-TD chances for this week.</div> : (
             <TableWrap className="max-h-[560px] overflow-y-auto">
               <table className="w-full"><thead className="sticky top-0 bg-surface"><tr><Th>Player</Th><Th className="hidden sm:table-cell">Opp</Th><Th className="text-right">Chance</Th><Th /></tr></thead>
