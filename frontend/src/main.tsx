@@ -19,6 +19,7 @@ import Trends from "./pages/Trends";
 import Builder from "./pages/Builder";
 import Ask from "./pages/Ask";
 import How from "./pages/How";
+import HitRates from "./pages/HitRates";
 import { EmptyState } from "./components/ui";
 import { STATIC } from "./lib/api";
 
@@ -42,6 +43,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Route path="builder" element={<Builder />} />
               <Route path="ask" element={<Ask />} />
               <Route path="props" element={<Props />} />
+              <Route path="hitrates" element={<HitRates />} />
               <Route path="trends" element={<Trends />} />
               <Route path="defenses" element={<Defenses />} />
               <Route path="defenses/:team" element={<DefenseDetail />} />

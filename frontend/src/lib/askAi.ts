@@ -4,7 +4,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaTool } from "@anthropic-ai/sdk/helpers/beta/json-schema.mjs";
 import {
-  answerAny, answerDue, answerWhy, answerGame, answerInjuries, answerJson, answerParlay, answerPerGame, answerPlayer, answerProps, answerRecord, answerSleepers, answerTop,
+  answerAny, answerDefense, answerDue, answerGames, answerGlossary, answerHitRates, answerLadder, answerLeaders, answerWhy, answerGame, answerInjuries, answerJson, answerParlay, answerPerGame, answerPlayer, answerProps, answerRecord, answerSleepers, answerTop,
   answerUnders, answerValue, gameLabel, parse, type AskData, type Filters,
 } from "@/lib/ask";
 import { MODEL } from "@/lib/aiKey";
@@ -82,6 +82,41 @@ function tools(d: AskData) {
       },
     }),
     betaTool({
+      name: "hit_rates", description: "Player props where he cleared the line in at least `threshold` of his last `window` games (e.g. 1.0 = 100%), at the highest line that holds (lowest for unders), with this week's model chance beside each. Use for hit-rate, 'every game', streak and 'hasn't missed' questions.",
+      inputSchema: { type: "object", properties: { threshold: { type: "number", minimum: 0.5, maximum: 1 }, window: { type: "integer", enum: [5, 8, 16] }, side: SIDE,
+        markets: { type: "array", items: { type: "string", enum: markets } }, limit: { type: "integer", minimum: 1, maximum: 40 }, position: POSITION, teams: TEAMS, day: DAY },
+        required: ["threshold", "limit"], additionalProperties: false } as const,
+      run: async (i) => out(answerJson(answerHitRates(d, i.limit, filters(i), { threshold: i.threshold, window: i.window, side: i.side, markets: i.markets }))),
+    }),
+    betaTool({
+      name: "player_line_ladder", description: "Every line for one player in one market: this week's model over/under chance and how often he cleared each line in his last 5 and last N games (alt lines). Use for 'how often has X gone over Y' questions.",
+      inputSchema: { type: "object", properties: { name: { type: "string" }, market: MARKET, window: { type: "integer", enum: [5, 8, 16] } }, required: ["name"], additionalProperties: false } as const,
+      run: async (i) => {
+        const ids = parse(d, i.name).players;
+        return ids.length ? out(answerJson(answerLadder(d, ids, i.market, i.window ?? 8))) : out({ error: "No player with that name has props this week." });
+      },
+    }),
+    betaTool({
+      name: "defense_matchups", description: "Each defense's touchdowns allowed to a position vs league average (from games before this week) and who they face this week. toughest=true sorts the stingiest first.",
+      inputSchema: { type: "object", properties: { position: POSITION, toughest: { type: "boolean" }, limit: { type: "integer", minimum: 1, maximum: 32 } }, required: ["position"], additionalProperties: false } as const,
+      run: async (i) => out(answerJson(answerDefense(d, i.position, !!i.toughest, i.limit ?? 10))),
+    }),
+    betaTool({
+      name: "game_totals", description: "This week's games ranked by projected total points (from the spread and total), with each team's implied points.",
+      inputSchema: { type: "object", properties: { lowest_first: { type: "boolean" }, day: DAY }, additionalProperties: false } as const,
+      run: async (i) => out(answerJson(answerGames(d, filters(i), !!i.lowest_first))),
+    }),
+    betaTool({
+      name: "projection_leaders", description: "Players with the highest (or lowest) projection in a prop market this week, with the 80% range and last-3 average.",
+      inputSchema: { type: "object", properties: { market: MARKET, lowest: { type: "boolean" }, limit: { type: "integer", minimum: 1, maximum: 30 }, position: POSITION, teams: TEAMS, day: DAY }, required: ["market"], additionalProperties: false } as const,
+      run: async (i) => out(answerJson(answerLeaders(d, i.market, i.limit ?? 10, filters(i), !!i.lowest))),
+    }),
+    betaTool({
+      name: "explain_term", description: "Plain definitions of the site's terms: tiers, edge, xTD, due, usual line, scores out of 10, walk-forward testing, hit rate, simulations, projection and range.",
+      inputSchema: { type: "object", properties: { term: { type: "string" } }, required: ["term"], additionalProperties: false } as const,
+      run: async (i) => out(answerGlossary(i.term.toLowerCase()) ?? { error: "Not a term the site defines." }),
+    }),
+    betaTool({
       name: "game_breakdown", description: "Most likely TD scorers and strongest prop sides in the game involving the given team(s).",
       inputSchema: { type: "object", properties: { teams: TEAMS }, required: ["teams"], additionalProperties: false } as const,
       run: async (i) => out(answerJson(answerGame(d, i.teams.map((t) => t.toUpperCase()), {}))),
@@ -121,6 +156,7 @@ Rules:
 - Chances are validated model probabilities; "tier" and "tier_past_hit_rate" say how often past picks in that range hit. Prefer higher chances and, when prices are loaded, real edges. Mention injury notes.
 - Match the market to the question. Only use TD tools when the visitor asks about touchdowns or scorers. If they say "any prop", "any market", "safest pick" or name no market, use safest_any_market (or best_per_game with market "any" for one per game).
 - For "why" questions, call explain_pick and answer in plain words from its numbers: what supports the lean, what works against it, and how confident the model is. Do not invent factors the tool did not return.
+- You can answer a wide range of questions: picks by market, position, team, game or day; parlays; value vs the books; unders; hit rates and streaks; a player's alt-line ladder; defenses and matchups; game totals; projection leaders; due players; injuries; the model's record; and what the site's terms mean. Combine tools for multi-part questions (for example game_totals then best_per_game).
 - Call several tools when the question needs it (for example list_games, then best_per_game). Pass filters (position, teams, day) when the question names them.
 - Keep the answer short and scannable: a one-line lead, then a list of picks (player, team, bet, our chance, best price if any), then at most two short caveats. No guarantees; book prices are sharp and no bet is a sure thing.`;
 

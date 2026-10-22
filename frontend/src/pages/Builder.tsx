@@ -61,8 +61,9 @@ function propLeg(r: PropRow, market: string, label: string, line: number, side: 
 const legText = (l: SlipLeg) => (l.market === "td" ? "Anytime TD" : `${l.side === "over" ? "Over" : "Under"} ${l.line} ${l.label.toLowerCase()}`);
 const recentHits = (l: SlipLeg) => {
   if (l.market === "td" || l.line == null || !l.recent?.length) return null;
-  const hits = l.recent.filter((g) => (l.side === "over" ? g.value > (l.line as number) : g.value < (l.line as number))).length;
-  return { hits, games: l.recent.length };
+  const rec = l.recent.slice(0, 8);
+  const hits = rec.filter((g) => (l.side === "over" ? g.value > (l.line as number) : g.value < (l.line as number))).length;
+  return { hits, games: rec.length };
 };
 
 export default function BuilderPage() {

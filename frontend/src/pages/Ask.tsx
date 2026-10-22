@@ -186,6 +186,14 @@ function AnswerView({ a, data, onAsk, season, week }: { a: Answer; data: AskData
             <span className="font-semibold">{num(p.median, 1)}</span><span className="text-xs text-muted">{num(p.range[0], 0)}–{num(p.range[1], 0)}</span>
           </li>))}</ul>
       )}
+      {a.table && (
+        <div className="overflow-x-auto border-t border-line">
+          <table className="w-full text-sm"><thead><tr className="text-left text-[11px] uppercase tracking-wide text-muted">
+            {a.table.columns.map((c, i) => <th key={c} className={cn("whitespace-nowrap px-4 py-2 font-medium sm:px-5", i > 0 && "text-right")}>{c}</th>)}</tr></thead>
+            <tbody>{a.table.rows.map((r, i) => (
+              <tr key={i} className="border-t border-line/60">{r.map((v, j) => <td key={j} className={cn("whitespace-nowrap px-4 py-1.5 sm:px-5", j > 0 ? "text-right" : "font-medium")}>{v}</td>)}</tr>))}</tbody></table>
+        </div>
+      )}
       <CardBody className="space-y-3">
         {a.notes.length > 0 && <ul className="space-y-1 text-xs text-muted">{a.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
         <div className="flex flex-wrap gap-2">

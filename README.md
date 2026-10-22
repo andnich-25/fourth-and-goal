@@ -119,7 +119,7 @@ The browser repeats the same model (`frontend/src/lib/sim.ts`): 40,000 correlate
 
 ## Ask
 
-`/ask` (and the question bar on the home page) answers plain-English questions from the site's own numbers: anytime TD picks, one scorer per game, prop sides at the book line or any line ("QBs who throw for 250"), value against the best price, overpriced bets, parlays (40,000 correlated simulations), a player, a team or game, longshots, the injury report and the model's track record, with position, team, day and count filters. The built-in engine (`frontend/src/lib/ask.ts`) is free and never invents a number. Optionally a visitor can paste their own Anthropic API key (kept only in that browser) to have Claude handle any wording; it can only answer through tools that call the same engine (`frontend/src/lib/askAi.ts`).
+`/ask` (and the question bar on the home page) answers plain-English questions from the site's own numbers: anytime TD picks, one scorer per game, prop sides at the book line or any line ("QBs who throw for 250"), value against the best price, overpriced bets, parlays (40,000 correlated simulations), a player, a team or game, longshots, the injury report and the model's track record, with position, team, day and count filters. It also answers "why" questions about a pick from its factors, hit-rate questions ("What props have a 100% hit rate?"), every line for one player ("Nacua receptions alt lines"), defense matchups by position, game totals, projection leaders by market, and what a term means. The built-in engine (`frontend/src/lib/ask.ts`) is free and never invents a number. Optionally a visitor can paste their own Anthropic API key (kept only in that browser) to have Claude handle any wording; it can only answer through tools that call the same engine (`frontend/src/lib/askAi.ts`).
 
 ## Props: over and under confidence
 
@@ -128,6 +128,10 @@ The Player props page gives every player an Under score and an Over score out of
 ## Signals: Edge and Due
 
 Player names carry two symbols. **Edge** ($): the anytime-TD chance beats the chance implied by the best US book price by 3+ points (only once prices are loaded). **Due** (hourglass): at least 1.5 fewer TDs this season than his carries and targets predicted (season expected TDs minus TDs, 3+ games). `engine/due.py` (`python -m engine.due`, served at `/backtest/due`) checks this walk-forward: on the October 2026 run, 1,611 due player-games scored 27.8% of the time, far above their 20.8% season TD rate and close to the 26.5% the model gave; players 1.5+ TDs ahead of expectation scored 32.7%, down from 48.6%. Adding the gap on top of the model's chance lowered accuracy on 80 unseen weeks (log loss +0.00008), so it is not double-counted. Both signals appear on player pages (with the numbers behind them), in rankings and in Ask ("Who is due for a TD?").
+
+## Hit rates
+
+`/hitrates` lists, for each player and market, the highest line he cleared in 100%, 90%, 80% or 70% of his last 5, 8 or 16 games (the lowest for unders), with this week's model chance and tier beside it, filterable by side, market, position and team. Every row on the Player props page also opens a ladder of lines with the model chance and recent hit counts at each (`frontend/src/lib/hitrates.ts`). A perfect recent record is not a forecast, so lists are sorted by the model's chance.
 
 ## How it works
 

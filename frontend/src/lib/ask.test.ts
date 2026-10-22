@@ -34,6 +34,15 @@ describe("ask parser", () => {
     ["Who will fall short this week?", "unders"],
     ["best unders for receivers", "unders"],
     ["who is due for a TD", "due"],
+    ["What props have a 100% hit rate?", "hitrate"],
+    ["unders that hit 90% of the time last 5", "hitrate"],
+    ["who is on a hot streak", "hitrate"],
+    ["worst defenses against running backs", "defense"],
+    ["best matchups for WRs this week", "defense"],
+    ["highest scoring games this week", "games"],
+    ["what does edge mean", "glossary"],
+    ["what is a tier", "glossary"],
+    ["most projected receiving yards", "leaders"],
     ["What is the safest pick from all 14 games. It can be any prop", "any"],
     ["best bets this week any market", "any"],
     ["give me the highest rated prop from each game", "pergame"],
@@ -106,6 +115,21 @@ describe("ask parser", () => {
   it("builds parlays from every market unless TDs are asked for", () => {
     expect(answer(d, "Give me the best 3 leg parlay for tonights game").title).toContain("any market");
     expect(answer(d, "3 leg TD parlay").title).toContain("TD parlay");
+  });
+
+  it("finds props at a hit rate and builds a player's ladder", () => {
+    const rec = [6, 7, 8, 6, 9, 7, 6, 10].map((v, i) => ({ season: 2026, week: 6 - i, opponent: "BUF", value: v }));
+    const wr = { player_id: "2", player_name: "Amon-Ra St. Brown", team: "DET", opponent: "TB", position: "WR", game_id: "2026_07_TB_DET", eligible: 1,
+      median: 7, q10: 4, q90: 10, recent: rec, evidence: { receptions_med: 7, snap_pct: 0.9 },
+      dist: { type: "quantiles" as const, q: Array.from({ length: 99 }, (_, i) => 3 + i * 0.08), platt: [1, 0] as [number, number] } };
+    const dd: AskData = { ...d, props: { receptions: { label: "Receptions", rows: [wr] } } };
+    const a = answer(dd, "What props have a 100% hit rate?");
+    expect(a.picks?.[0].label).toBe("Over 5.5 receptions");
+    expect(a.picks?.[0].reasons?.[0]).toContain("8 of 8");
+    const b = answer(dd, "what props hit 60% of the time");
+    expect(b.picks?.[0].label).toBe("Over 6.5 receptions");
+    const l = answer(dd, "St. Brown alt lines receptions");
+    expect(l.table?.rows.some((r) => String(r[0]) === "5.5" && String(r[3]).startsWith("8 of 8"))).toBe(true);
   });
 
   it("flags due players from expected vs actual TDs", () => {

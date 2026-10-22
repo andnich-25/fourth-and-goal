@@ -13,6 +13,7 @@ import { Flags, NoDataState, TierBadge } from "@/components/shared";
 import { useConfidence, tierFor } from "@/lib/confidence";
 import { overReasons, underReasons, usualLine, type Recent } from "@/lib/ask";
 import { likelyToPlay, starterQbs } from "@/lib/playing";
+import { ladder } from "@/lib/hitrates";
 
 export type MarketMeta = {
   market: string; label: string; positions: string[]; kind: string; validated: boolean; model: string | null; tested: boolean;
@@ -229,6 +230,8 @@ export default function PropsPage() {
                       </tr>
                       {open === r.player_id && (
                         <tr className="border-b border-line bg-raised/30"><td colSpan={11} className="px-4 py-3">
+                          {/* Pinned to the visible part of the table so it stays readable when the table is scrolled sideways on a phone. */}
+                          <div className="sticky left-4 max-w-[calc(100vw-5rem)] sm:max-w-none">
                           {lean && (
                             <div className="mb-3">
                               <div className="text-sm font-semibold">Why it leans {lean} {line}</div>
@@ -236,14 +239,16 @@ export default function PropsPage() {
                                 : <p className="mt-1 text-sm text-muted">No single factor stands out; the lean comes from the model weighing everything below together.</p>}
                             </div>
                           )}
+                          {r.dist && <LineLadder r={r} line={line} />}
                           <div className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-4">
                             {Object.entries(r.evidence).map(([ek, v]) => (
                               <div key={ek} className="flex justify-between gap-3"><span className="text-muted">{evidenceLabel(ek, stat, m?.label ?? "")}</span><span className="font-medium">{evidenceValue(ek, v)}</span></div>
                             ))}
                           </div>
-                          {!!r.recent?.length && <p className="mt-2 text-xs text-muted">Last {r.recent.length} games, newest first: {r.recent.map((g) => num(g.value, 0)).join(", ")}</p>}
+                          {!!r.recent?.length && <p className="mt-2 text-xs text-muted">Last {r.recent.length} games played, newest first: {r.recent.map((g) => num(g.value, 0)).join(", ")}</p>}
                           <Flags flags={r.flags} className="mt-2" />
                           <p className="mt-2 text-xs text-muted">All numbers come from games before this week. Model {r.model}; mean projection {num(r.mean, 1)}. Typed lines and prices are saved in this browser only.</p>
+                          </div>
                         </td></tr>
                       )}
                     </React.Fragment>
@@ -255,6 +260,38 @@ export default function PropsPage() {
         </Card>
       )}
       {d?.note && <p className="text-xs text-muted">{d.note}</p>}
+    </div>
+  );
+}
+
+/** Every line for one player: this week's chance and how often he cleared it recently. */
+function LineLadder({ r, line }: { r: PropRow; line: number }) {
+  const [win, setWin] = React.useState(8);
+  const rungs = ladder(r, win);
+  if (!rungs.length) return null;
+  const tone = (x: number) => (x >= 0.8 ? "text-accent font-semibold" : x <= 0.2 ? "text-danger" : "");
+  return (
+    <div className="mb-3">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold">Every line</span>
+        <Segmented size="sm" label="Games" value={win} onChange={setWin} options={[5, 8, 16].map((n) => ({ value: n, label: `Last ${n}` }))} />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="text-sm"><thead><tr className="text-left text-[11px] uppercase tracking-wide text-muted">
+          <th className="pr-4 font-medium">Line</th><th className="pr-4 text-right font-medium">Over (model)</th><th className="pr-4 text-right font-medium">Under (model)</th>
+          <th className="pr-4 text-right font-medium">Over, last {rungs[0].games}</th><th className="text-right font-medium">Under, last {rungs[0].games}</th></tr></thead>
+          <tbody>{rungs.map((x) => {
+            const o = x.over ?? 0, hr = x.games ? x.hits / x.games : 0;
+            return (
+              <tr key={x.line} className={cn("border-t border-line/50", x.line === line && "bg-accent/10")}>
+                <td className="py-0.5 pr-4 font-medium">{x.line}{x.line === line && <span className="ml-1 text-[10px] text-muted">shown</span>}</td>
+                <td className={cn("pr-4 text-right", tone(o))}>{pct(o, 0)}</td><td className={cn("pr-4 text-right", tone(1 - o))}>{pct(1 - o, 0)}</td>
+                <td className={cn("pr-4 text-right", tone(hr))}>{x.hits}/{x.games} ({pct(hr, 0)})</td>
+                <td className={cn("text-right", tone(1 - hr))}>{x.games - x.hits}/{x.games} ({pct(1 - hr, 0)})</td>
+              </tr>);
+          })}</tbody></table>
+      </div>
+      <p className="mt-1 text-xs text-muted">Hit rates count games he played. The model's chance is this week's forecast and also weighs the matchup, role and game script.</p>
     </div>
   );
 }
