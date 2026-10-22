@@ -9,7 +9,9 @@ import { useLinkSuffix, usePins, useSeasonWeek } from "@/lib/state";
 import type { RankingRow, RankingsResponse } from "@/lib/types";
 import { PageTitle } from "@/components/Layout";
 import { Badge, Button, Card, ErrorState, Input, LoadingBlock, PosBadge, Segmented, Switch, TeamBadge } from "@/components/ui";
-import { ConfidenceBadge, Flags, ModelBadge, NoDataState, Outcome, ReasonList } from "@/components/shared";
+import { ConfidenceBadge, Flags, ModelBadge, NoDataState, Outcome, ReasonList, SignalIcons } from "@/components/shared";
+import { useFeed } from "@/lib/feed";
+import { dueOf, tdEdge } from "@/lib/signals";
 
 const h = createColumnHelper<RankingRow>();
 const SORTABLE = new Set(["rank", "score", "p_model", "player_name", "team", "position", "opponent", "rz_carries_pg", "goal5_carries_pg",
@@ -48,6 +50,8 @@ export default function RankingsPage() {
   const d = res.data;
   const calibrated = !!d?.calibrated;
   const fa = d?.fields_available ?? {};
+  const feed = useFeed(season, week);
+  const sig = React.useCallback((r: RankingRow) => (r.eligible ? <SignalIcons due={dueOf(r.features)} edge={calibrated ? tdEdge(feed, r.player_id, r.p_model) : null} /> : null), [feed, calibrated]);
 
   const columns = React.useMemo(() => [
     h.display({ id: "pin", header: () => <span className="sr-only">Pin</span>, enableHiding: false, cell: ({ row }) => {
@@ -66,7 +70,7 @@ export default function RankingsPage() {
       <div className="flex min-w-[180px] items-center gap-2">
         <TeamBadge team={row.original.team} />
         <div className="min-w-0">
-          <Link to={`/players/${row.original.player_id}${suffix}`} onClick={(e) => e.stopPropagation()} className="block truncate font-medium hover:text-accent">{row.original.player_name}</Link>
+          <Link to={`/players/${row.original.player_id}${suffix}`} onClick={(e) => e.stopPropagation()} className="flex items-center gap-1 font-medium hover:text-accent"><span className="truncate">{row.original.player_name}</span>{sig(row.original)}</Link>
           {!row.original.eligible && <span className="text-[11px] text-danger">{row.original.exclusion}</span>}
         </div>
       </div>
@@ -92,7 +96,7 @@ export default function RankingsPage() {
     h.accessor("confidence", { header: "Data", enableSorting: false, cell: (c) => <ConfidenceBadge c={c.getValue()} /> }),
     h.display({ id: "outcome", header: "Result", cell: ({ row }) => <Outcome outcome={row.original.outcome} participated={row.original.participated} /> }),
     h.display({ id: "flags", header: "Flags", cell: ({ row }) => row.original.flags.length ? <Badge tone="warn" title={row.original.flags.join("\n")}>{row.original.flags.length}</Badge> : null }),
-  ], [calibrated, pins, suffix, season, week]);
+  ], [calibrated, pins, suffix, season, week, sig]);
 
   const table = useReactTable({
     data: d?.rows ?? [], columns, getCoreRowModel: getCoreRowModel(), manualSorting: true, manualPagination: true,
@@ -146,6 +150,7 @@ export default function RankingsPage() {
             {d.total} players · data cutoff {d.data_cutoff} · generated {chicago(d.as_of)} ·{" "}
             {calibrated ? "P(TD) is a validated game-level estimate; Score is a percentile rank, not a probability." : "Probabilities are hidden because no model has passed validation."}
             {!fa.injury_report && " Injury reports not yet published for this week."}
+            {" "}Symbols: <Link to={`/how${suffix}`} className="underline">$ edge vs the book, hourglass = due for a score</Link>.
           </p>
         )}
       </Card>
@@ -227,7 +232,7 @@ export default function RankingsPage() {
                       <span className="w-7 font-mono text-xs text-muted">{r.rank ?? "—"}</span>
                       <TeamBadge team={r.team} />
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium">{r.player_name}</div>
+                        <div className="flex items-center gap-1 text-sm font-medium"><span className="truncate">{r.player_name}</span>{sig(r)}</div>
                         <div className="text-xs text-muted">{r.position} · {r.is_home ? "vs" : "@"} {r.opponent} · {num(r.features.rz_carries_pg)} RZ car · {num(r.features.rz_targets_pg)} RZ tgt</div>
                       </div>
                       <div className="text-right">

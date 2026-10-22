@@ -125,6 +125,10 @@ The browser repeats the same model (`frontend/src/lib/sim.ts`): 40,000 correlate
 
 The Player props page gives every player an Under score and an Over score out of 10 for the line shown (the book line when loaded, otherwise his usual line: recent median rounded down plus 0.5, or a line you type). The score is the model's chance of that side times 10, so the two always add to 10; the bigger one is the lean, labeled with its confidence tier and the past hit rate for that tier. Rows open to show why: opponent defense against the position compared with the league, recent games against the line, role and team scoring outlook. `/backtest/confidence` tracks overs and unders separately (`by_side`) and unders by market (`unders_by_market`); on 96 unseen weeks, unders the model gave 65%+ hit 73.6% (13,023 picks).
 
+## Signals: Edge and Due
+
+Player names carry two symbols. **Edge** ($): the anytime-TD chance beats the chance implied by the best US book price by 3+ points (only once prices are loaded). **Due** (hourglass): at least 1.5 fewer TDs this season than his carries and targets predicted (season expected TDs minus TDs, 3+ games). `engine/due.py` (`python -m engine.due`, served at `/backtest/due`) checks this walk-forward: on the October 2026 run, 1,611 due player-games scored 27.8% of the time, far above their 20.8% season TD rate and close to the 26.5% the model gave; players 1.5+ TDs ahead of expectation scored 32.7%, down from 48.6%. Adding the gap on top of the model's chance lowered accuracy on 80 unseen weeks (log loss +0.00008), so it is not double-counted. Both signals appear on player pages (with the numbers behind them), in rankings and in Ask ("Who is due for a TD?").
+
 ## How it works
 
 `/how` explains the chances, tiers, edge, lines and model inputs in plain language and shows the live ratings: the promoted TD model's accuracy against baselines, the TD and props tier records, overs vs unders, unders by market and the against-the-books record.

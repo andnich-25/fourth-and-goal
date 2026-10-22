@@ -8,18 +8,19 @@ import { feedLine } from "@/lib/feed";
 import { pOver, type PropDist } from "@/lib/props";
 import { simulate, type Buckets, type SimLeg } from "@/lib/sim";
 import type { RankingRow } from "@/lib/types";
+import { dueOf, type Due, type DueBin } from "@/lib/signals";
 
 export type Recent = { season: number; week: number; opponent: string; value: number };
 export type PropRow = { player_id: string; player_name: string; team: string; opponent: string; position: string; game_id: string; eligible: number;
   median: number; q10: number; q90: number; dist: PropDist | null; recent?: Recent[]; evidence?: Record<string, number | null> };
 export type AskData = {
   season: number; week: number; td: RankingRow[]; props: Record<string, { label: string; rows: PropRow[] }>;
-  feed: Feed; conf?: Confidence; buckets: Buckets; useCorr: boolean;
+  feed: Feed; conf?: Confidence; buckets: Buckets; useCorr: boolean; dueRecord?: DueBin | null;
 };
 export type Pick = {
   id: string; player_id: string; name: string; team: string; opp: string; pos: string; game_id: string; market: string; label: string;
   p: number; kind: "td" | "props"; side: "yes" | "over" | "under"; line?: number; price?: number; book?: string; edge?: number;
-  tier?: string; tierRate?: number | null; tierData?: Tier; note?: string; reasons?: string[]; lineSource?: "book" | "usual"; median?: number; range?: [number, number]; dist?: PropDist; recent?: Recent[];
+  tier?: string; tierRate?: number | null; tierData?: Tier; note?: string; reasons?: string[]; lineSource?: "book" | "usual"; median?: number; range?: [number, number]; dist?: PropDist; recent?: Recent[]; due?: Due;
 };
 export type Answer = {
   title: string; summary: string; picks?: Pick[]; groups?: { title: string; picks: Pick[] }[];
@@ -92,7 +93,7 @@ export function tdPick(d: AskData, r: RankingRow): Pick {
     id: `td:${r.player_id}`, player_id: r.player_id, name: r.player_name, team: r.team, opp: r.opponent ?? "", pos: r.position,
     game_id: r.game_id ?? "", market: "td", label: "Anytime TD", p: r.p_model as number, kind: "td", side: "yes",
     price: b?.price, book: b?.book, edge: b ? (r.p_model as number) - 1 / dec(b.price) : undefined,
-    note: st ? `Injury report: ${st}` : undefined,
+    note: st ? `Injury report: ${st}` : undefined, due: dueOf(r.features) ?? undefined,
   });
 }
 
@@ -437,6 +438,23 @@ export function answerSleepers(d: AskData, n: number, f: Filters): Answer {
   };
 }
 
+export function answerDue(d: AskData, n: number, f: Filters): Answer {
+  const picks = tdPool(d, f).filter((p) => p.due).sort((a, b) => (b.due as Due).gap - (a.due as Due).gap).slice(0, n)
+    .map((p) => { const x = p.due as Due; return { ...p, reasons: [`${x.actual} TD${x.actual === 1 ? "" : "s"} on ${num1(x.expected)} expected from his carries and targets in ${x.games} games`] }; });
+  if (!picks.length) return none(d, "No player is due right now", f);
+  const r = d.dueRecord;
+  return {
+    title: `Due for a touchdown${describe(f) ? ` (${describe(f)})` : ""}`,
+    summary: "Players who have scored at least 1.5 fewer TDs this season than their opportunities predicted, biggest gap first. The chance shown already counts that opportunity.",
+    picks, notes: [
+      r?.hit_rate != null && r.season_td_rate != null && r.avg_chance != null
+        ? `In ${r.n.toLocaleString()} past cases, due players scored in ${pct(r.hit_rate)} of games, well above their ${pct(r.season_td_rate)} rate so far and close to the ${pct(r.avg_chance)} the model gave, so the bounce-back is real and already in the chances.`
+        : "The chance shown already includes his opportunity, so being due is not added on top.",
+      ...priceNote(d)],
+    followups: ["Top 5 TD scorers", "Best value bets"],
+  };
+}
+
 export function answerInjuries(d: AskData, f: Filters): Answer {
   const rows = d.td.filter((r) => status(r) && keep(d, { ...f, safe: false }, { pos: r.position, team: r.team, opp: r.opponent ?? "", game_id: r.game_id ?? "" }))
     .sort((a, b) => (b.p_model ?? 0) - (a.p_model ?? 0)).slice(0, 15);
@@ -476,6 +494,7 @@ export const EXAMPLES = [
   "Best WR receiving yards overs",
   "Who scores in the Thursday game?",
   "Longshot TD picks",
+  "Who is due for a TD?",
   "Gibbs vs Henry",
   "How accurate is the model?",
 ];
@@ -563,6 +582,7 @@ export function parse(d: AskData, raw: string): Parsed {
   if (/\b(fall short|come up short|struggle|won'?t (hit|reach|get)|held (in check|under)|shut ?down|bust|unders?)\b/.test(q) && !/\b(parlay|each|every)\b/.test(q)) return { ...base, intent: "unders" };
   if (/\b(longshots?|long shots?|sleepers?|dark ?horse|big payout|plus money|underdogs? to score|lottery)\b/.test(q)) return { ...base, intent: "sleepers" };
   if (pl.ids.length && !/\b(top|best|safest|most likely|highest)\b/.test(q) && line == null) return { ...base, intent: "player" };
+  if (/\b(due|overdue|bounce ?back|unlucky|positive regression|buy ?low)\b/.test(q) && !/\bparlay\b/.test(q)) return { ...base, intent: "due" };
   if (value) return { ...base, intent: "value" };
   if (market) return { ...base, intent: "props" };
   if (teams.size && (teams.size > 1 || /\b(vs|versus|game|matchup|against|at)\b/.test(q) || !(td || /\b(top|best|safest|picks?|bets?|who)\b/.test(q)))) return { ...base, intent: "game" };
@@ -582,6 +602,7 @@ export function answer(d: AskData, raw: string): Answer {
     case "pergame": a = answerPerGame(d, p.market ?? "td", f); break;
     case "parlay": a = answerParlay(d, Math.min(Math.max(p.n ?? 3, 2), 8), f, { market: p.market, value: p.value, sameGame: p.sameGame }); break;
     case "sleepers": a = answerSleepers(d, p.n ?? 6, f); break;
+    case "due": a = answerDue(d, p.n ?? 8, f); break;
     case "player": a = answerPlayer(d, p.players.slice(0, 3), p.market ?? (/\b(td|touchdown|score)/.test(norm(raw)) ? "td" : undefined)); break;
     case "avoid": a = answerAvoid(d, p.n ?? 8, f); break;
     case "unders": a = p.line != null && p.market ? answerProps(d, p.market, p.n ?? 10, f, "under", p.line) : answerUnders(d, p.n ?? 8, f, p.market ? [p.market] : undefined); break;
@@ -602,6 +623,7 @@ export const pickJson = (p: Pick) => ({ player: p.name, team: p.team, opponent: 
   price_implied_chance: p.price != null ? Number((1 / dec(p.price)).toFixed(3)) : null, edge: p.edge != null ? Number(p.edge.toFixed(3)) : null,
   tier: p.tier ?? null, tier_past_hit_rate: p.tierRate != null ? Number(p.tierRate.toFixed(3)) : null, note: p.note ?? null,
   projection: p.median != null ? { median: p.median, range_10_90: p.range } : null, reasons: p.reasons ?? null,
+  due: p.due ? { tds: p.due.actual, expected_tds: Number(p.due.expected.toFixed(2)), games: p.due.games } : null,
   line_source: p.lineSource === "usual" ? "player's usual line (no book line loaded)" : p.line != null ? "book line" : null });
 
 export const answerJson = (a: Answer) => ({ title: a.title, summary: a.summary, picks: a.picks?.map(pickJson),

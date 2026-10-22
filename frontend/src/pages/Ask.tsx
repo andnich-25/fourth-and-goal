@@ -13,7 +13,8 @@ import type { Buckets } from "@/lib/sim";
 import { useLinkSuffix, useSeasonWeek } from "@/lib/state";
 import type { RankingsResponse } from "@/lib/types";
 import { PageTitle } from "@/components/Layout";
-import { TierBadge } from "@/components/shared";
+import { SignalIcons, TierBadge } from "@/components/shared";
+import { dueRecord, useDueStudy } from "@/lib/signals";
 import { Badge, Button, Card, CardBody, CardHeader, Input, LoadingBlock, Notice, PosBadge, TeamBadge } from "@/components/ui";
 
 const SLIP_KEY = "fg-parlay-slip-v1";
@@ -27,6 +28,7 @@ export function useAskData(season: number, week: number): { data: AskData | null
   const model = useQuery({ queryKey: ["parlay-model"], queryFn: () => api.get<{ use_correlation: boolean; buckets: Buckets }>("/parlay/model") });
   const feed = useFeed(season, week);
   const conf = useConfidence();
+  const due = useDueStudy();
   const loading = ranks.isLoading || markets.isLoading || props.some((p) => p.isLoading) || model.isLoading;
   const propsKey = props.map((p) => p.dataUpdatedAt).join(",");
   const data = React.useMemo<AskData | null>(() => {
@@ -34,9 +36,9 @@ export function useAskData(season: number, week: number): { data: AskData | null
     const pm: AskData["props"] = {};
     validated.forEach((m, i) => { const rows = props[i]?.data?.rows; if (rows) pm[m.market] = { label: m.label, rows }; });
     return { season, week, td: ranks.data.calibrated ? ranks.data.rows : [], props: pm, feed, conf: conf.data,
-      buckets: model.data?.buckets ?? {}, useCorr: !!model.data?.use_correlation };
+      buckets: model.data?.buckets ?? {}, useCorr: !!model.data?.use_correlation, dueRecord: dueRecord(due.data) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ranks.data, propsKey, feed, conf.data, model.data, season, week]);
+  }, [ranks.data, propsKey, feed, conf.data, model.data, due.data, season, week]);
   return { data, loading };
 }
 
@@ -204,6 +206,8 @@ export function PickList({ picks, suffix }: { picks: Pick[]; suffix: string }) {
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="hidden sm:inline-flex"><TeamBadge team={p.team} /></span><PosBadge pos={p.pos} />
               <Link className="truncate text-sm font-medium hover:text-accent" to={`/players/${p.player_id}${suffix}`}>{p.name}</Link>
+              <SignalIcons due={p.due} edge={p.kind === "td" && p.edge != null && p.edge >= 0.03 && p.price != null && p.book
+                ? { chance: p.p, price: p.price, book: p.book, implied: p.p - p.edge, edge: p.edge, ev100: 0 } : null} />
               <span className="text-xs text-muted">{p.team} · {gameLabel(p.game_id)}</span>
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted">

@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen } from "lucide-react";
+import { BookOpen, CircleDollarSign, Hourglass } from "lucide-react";
 import { api } from "@/lib/api";
 import { useConfidence } from "@/lib/confidence";
 import { chicago, num, pct } from "@/lib/format";
@@ -9,6 +9,7 @@ import type { ProbMetrics } from "@/lib/types";
 import { PageTitle } from "@/components/Layout";
 import { Card, CardBody, CardHeader, Stat, TableWrap, Td, Th } from "@/components/ui";
 import { TierTable } from "./Backtest";
+import { DUE_GAP, useDueStudy } from "@/lib/signals";
 
 type Summary = { available: boolean; created_at: string; test_weeks: [number, number][]; overall: Record<string, ProbMetrics>; gate: { promoted: string | null } };
 type OddsRecord = { picks: number; wins?: number; win_rate?: number | null; avg_implied?: number | null; units?: number; empty_reason?: string };
@@ -34,6 +35,8 @@ export default function HowPage() {
   const p = conf.data?.props;
   const r = rec.data;
   const strongUnder = p?.by_side?.under.find((t) => t.tier === "Strong");
+  const due = useDueStudy();
+  const dueBin = due.data?.bins?.find((b) => b.lo >= DUE_GAP);
 
   return (
     <div className="space-y-5">
@@ -61,6 +64,24 @@ export default function HowPage() {
             <Term name="Projection and range">For props, the middle outcome and the range he lands in 8 times out of 10.</Term>
             <Term name="Reasons">Why a pick ranks where it does: the opponent's defense against that position compared with the league, recent form, role and the team's scoring outlook.</Term>
           </dl>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Symbols next to player names" />
+        <CardBody className="space-y-4 text-sm">
+          <div className="flex gap-3">
+            <CircleDollarSign className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
+            <div><div className="font-semibold">Edge</div>
+              <p className="text-muted">Our anytime-TD chance beats the chance implied by the best price at any US book by 3 points or more. Example: we say 40%, the best price is +200 (33% implied), so the edge is +7 points. Only appears once the week's prices are loaded. These picks are graded every week in the against-the-books record below.</p></div>
+          </div>
+          <div className="flex gap-3">
+            <Hourglass className="mt-0.5 h-5 w-5 shrink-0 text-warn" />
+            <div><div className="font-semibold">Due</div>
+              <p className="text-muted">He has scored at least 1.5 fewer TDs this season than his carries and targets predicted (expected TDs, from how often touches at each spot on the field have turned into scores since 2018), over 3+ games.
+                {dueBin?.hit_rate != null && dueBin.season_td_rate != null && dueBin.avg_chance != null && <> Tested on {due.data?.test?.weeks} unseen weeks: {dueBin.n.toLocaleString()} due players went on to score in {pct(dueBin.hit_rate, 0)} of games, far above their {pct(dueBin.season_td_rate, 0)} rate so far, and close to the {pct(dueBin.avg_chance, 0)} the model gave them.</>}
+                {" "}So being due is real, and the model's chance already includes it. Adding the gap on top again made predictions slightly worse, so it is not double-counted.</p></div>
+          </div>
         </CardBody>
       </Card>
 

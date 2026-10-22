@@ -4,7 +4,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaTool } from "@anthropic-ai/sdk/helpers/beta/json-schema.mjs";
 import {
-  answerGame, answerInjuries, answerJson, answerParlay, answerPerGame, answerPlayer, answerProps, answerRecord, answerSleepers, answerTop,
+  answerDue, answerGame, answerInjuries, answerJson, answerParlay, answerPerGame, answerPlayer, answerProps, answerRecord, answerSleepers, answerTop,
   answerUnders, answerValue, gameLabel, parse, type AskData, type Filters,
 } from "@/lib/ask";
 import { MODEL } from "@/lib/aiKey";
@@ -81,6 +81,11 @@ function tools(d: AskData) {
       name: "longshot_td", description: "TD picks with a 20-35% chance (bigger payouts), ranked by edge over the best price when prices are loaded.",
       inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 20 }, position: POSITION, teams: TEAMS }, required: ["limit"], additionalProperties: false } as const,
       run: async (i) => out(answerJson(answerSleepers(d, i.limit, filters(i)))),
+    }),
+    betaTool({
+      name: "due_for_td", description: "Players who have scored at least 1.5 fewer TDs this season than their carries and targets predicted (expected TDs), with how such players have scored in the past. Their chance already includes that opportunity.",
+      inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 20 }, position: POSITION, teams: TEAMS, day: DAY }, required: ["limit"], additionalProperties: false } as const,
+      run: async (i) => out(answerJson(answerDue(d, i.limit, filters(i)))),
     }),
     betaTool({
       name: "injury_report", description: "Skill players on this week's official injury report with their TD chance.",

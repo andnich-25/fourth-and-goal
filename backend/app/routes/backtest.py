@@ -73,6 +73,14 @@ def week_detail(season: int, week: int, model: str | None = None, limit: int = Q
     return {"available": True, "model": model, "season": season, "week": week, "rows": rows}
 
 
+@router.get("/due")
+def due(c: sqlite3.Connection = Depends(get_db)):
+    """Do players who have scored fewer TDs than their opportunities predicted bounce back? (engine/due.py)"""
+    from engine import due as due_study
+
+    return due_study.latest(c)
+
+
 @router.get("/tuning")
 def tuning():
     """Results of the last tuning study (python -m engine.tuning), if one has been run."""

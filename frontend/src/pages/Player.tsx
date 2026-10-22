@@ -1,14 +1,16 @@
 import * as React from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Info } from "lucide-react";
+import { ArrowLeft, CircleDollarSign, Hourglass, Info } from "lucide-react";
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "@/lib/api";
 import { cn, kickoff, num, pct } from "@/lib/format";
 import { useLinkSuffix, useSeasonWeek } from "@/lib/state";
 import type { Reason } from "@/lib/types";
 import { Badge, Card, CardBody, CardHeader, ErrorState, LoadingBlock, Notice, PosBadge, Segmented, Stat, TableWrap, Td, TeamBadge, Th } from "@/components/ui";
-import { ConfidenceBadge, Estimate, Flags, Outcome, ReasonList } from "@/components/shared";
+import { ConfidenceBadge, Estimate, Flags, Outcome, ReasonList, SignalIcons } from "@/components/shared";
+import { useFeed } from "@/lib/feed";
+import { DUE_GAP, dueOf, tdEdge, tdLuck, useDueStudy } from "@/lib/signals";
 
 type Game = { week: number; opponent: string; carries: number; targets: number; receptions: number; rush_tds: number; rec_tds: number; anytime_tds: number;
   goal5_carries: number; goal10_carries: number; rz_carries: number; goal5_targets: number; goal10_targets: number; rz_targets: number; ez_target_proxy: number;
@@ -36,6 +38,7 @@ export default function PlayerPage() {
   const f = p?.features ?? {};
   const chart = (d?.games ?? []).map((g) => ({ week: `W${g.week}`, "Inside-5 carries": g.goal5_carries, "Inside-10 carries": g.goal10_carries, "RZ targets": g.rz_targets, TDs: g.anytime_tds, xTD: g.xtd != null ? +g.xtd.toFixed(2) : null }));
   const events = (d?.events ?? []).filter((e) => ledgerFilter === "all" || (ledgerFilter === "missed" ? !e.td : ledgerFilter === "td" ? e.td : e.yards_to_goal <= 5));
+  const feed = useFeed(season, week);
   const tot = (k: keyof Game) => (d?.games ?? []).reduce((a, g) => a + (Number(g[k]) || 0), 0);
 
   return (
@@ -45,14 +48,15 @@ export default function PlayerPage() {
       {q.isLoading && <Card><LoadingBlock rows={8} className="p-4" /></Card>}
       {d && (
         <>
-          <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)_320px]">
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-[320px_minmax(0,1fr)_320px]">
             {/* Identity / game */}
             <Card>
               <CardBody className="space-y-4">
                 <div className="flex items-center gap-3">
                   {d.headshot_url ? <img src={d.headshot_url} alt="" className="h-16 w-16 rounded-xl bg-raised object-cover" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} /> : <TeamBadge team={d.team} size="lg" />}
                   <div className="min-w-0">
-                    <h1 className="font-display text-2xl font-bold leading-tight tracking-tight">{d.player_name}</h1>
+                    <h1 className="flex items-center gap-1.5 font-display text-2xl font-bold leading-tight tracking-tight">{d.player_name}
+                      {p?.eligible && <SignalIcons className="[&_svg]:h-5 [&_svg]:w-5" due={dueOf(f)} edge={p.calibrated ? tdEdge(feed, d.player_id, p.p_model) : null} />}</h1>
                     <div className="mt-1 flex items-center gap-2 text-sm text-muted"><TeamBadge team={d.team} /><PosBadge pos={d.position} />{d.roster_status && <Badge>{d.roster_status}</Badge>}</div>
                   </div>
                 </div>
@@ -70,6 +74,7 @@ export default function PlayerPage() {
                     {!p.eligible && <Notice tone="warn" title="Not eligible">{p.exclusion}</Notice>}
                     <div className="flex flex-wrap gap-1.5"><ConfidenceBadge c={p.confidence} /><Badge tone="neutral">{p.model_version}</Badge></div>
                     <Flags flags={p.flags} />
+                    <Signals features={f} chance={p.calibrated ? p.p_model : null} playerId={d.player_id} feed={feed} />
                     <p className="text-xs text-muted">Built from data through {p.data_cutoff}. Injury status: {f.report_status ? String(f.report_status) : f.injury_report_published ? "not listed" : "report not yet published"}.</p>
                   </>
                 ) : <Notice tone="info">No candidate row for {season} Week {week} (bye, inactive, or no earlier games).</Notice>}
@@ -183,6 +188,46 @@ export default function PlayerPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function Signals({ features, chance, playerId, feed }: { features: Record<string, unknown>; chance: number | null; playerId: string; feed: ReturnType<typeof useFeed> }) {
+  const study = useDueStudy();
+  const luck = tdLuck(features);
+  const bins = study.data?.bins ?? [];
+  const dueBin = bins.find((b) => b.lo >= DUE_GAP);
+  const hotBin = bins.find((b) => b.hi <= -DUE_GAP);
+  const priced = chance != null ? tdEdge(feed, playerId, chance, -1) : null;
+  const edge = priced && priced.edge >= 0.03 ? priced : null;
+  const price = (x: number) => (x > 0 ? `+${x}` : String(x));
+  const state = !luck ? null : luck.gap >= DUE_GAP ? "due" : luck.gap <= -DUE_GAP ? "hot" : "even";
+  return (
+    <div className="space-y-3 rounded-lg border border-line p-3 text-sm">
+      <div className="label">Signals</div>
+      <div className="flex gap-2.5">
+        <CircleDollarSign className={cn("mt-0.5 h-4 w-4 shrink-0", edge ? "text-accent" : "text-muted/50")} />
+        <div>
+          <div className="font-medium">{edge ? `Edge: +${Math.round(edge.edge * 100)} pts vs the book` : "Edge"}</div>
+          <div className="text-xs text-muted">{chance == null ? "Shown when a validated chance is available."
+            : !priced ? "No sportsbook price loaded for him this week yet. Prices are pulled on Saturday."
+              : `Best price ${price(priced.price)} (${priced.book}) implies ${pct(priced.implied, 0)}; our chance is ${pct(chance, 0)}. ${edge
+                ? `Expected return about ${priced.ev100 >= 0 ? "+" : "-"}$${Math.abs(Math.round(priced.ev100))} per $100 over many bets like it.` : "Not enough gap to call it an edge (3 points minimum)."}`}</div>
+        </div>
+      </div>
+      <div className="flex gap-2.5">
+        <Hourglass className={cn("mt-0.5 h-4 w-4 shrink-0", state === "due" ? "text-warn" : "text-muted/50")} />
+        <div>
+          <div className="font-medium">{state === "due" ? "Due for a score" : state === "hot" ? "Scoring above his chances" : "TD luck"}</div>
+          <div className="text-xs text-muted">{!luck ? "Needs at least 3 games this season."
+            : `${luck.actual} TD${luck.actual === 1 ? "" : "s"} on ${num(luck.expected, 1)} expected from his carries and targets in ${luck.games} games. `}
+            {state === "due" && dueBin?.hit_rate != null && dueBin.season_td_rate != null && dueBin.avg_chance != null
+              && `Players this far behind scored in ${pct(dueBin.hit_rate, 0)} of their next games (${dueBin.n.toLocaleString()} cases), well above their ${pct(dueBin.season_td_rate, 0)} rate so far. The model gave them ${pct(dueBin.avg_chance, 0)}, so his chance already includes the bounce-back.`}
+            {state === "hot" && hotBin?.hit_rate != null && hotBin.season_td_rate != null
+              && `Players this far ahead scored in ${pct(hotBin.hit_rate, 0)} of their next games, down from ${pct(hotBin.season_td_rate, 0)} so far. His chance already expects some cooling.`}
+            {state === "even" && "Scoring about as often as his opportunities predict."}</div>
+        </div>
+      </div>
     </div>
   );
 }

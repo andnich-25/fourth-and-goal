@@ -1,8 +1,9 @@
 import { Link } from "react-router-dom";
-import { AlertCircle, CheckCircle2, Database, Minus, TrendingDown, TrendingUp } from "lucide-react";
+import { AlertCircle, CheckCircle2, CircleDollarSign, Database, Hourglass, Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { cn, num, pct } from "@/lib/format";
 import { useLinkSuffix } from "@/lib/state";
 import type { Reason } from "@/lib/types";
+import type { Due, Edge } from "@/lib/signals";
 import { Badge, Button, EmptyState } from "./ui";
 
 /** Probability when validated; otherwise the research score with an explicit "not a probability" label. */
@@ -99,5 +100,19 @@ export function TierBadge({ tier, compact = false }: { tier: import("@/lib/confi
     <Badge tone={tone} title={`Past walk-forward picks in the ${tier.tier} band (${pct(tier.lo, 0)}–${pct(tier.hi, 0)}): ${record}`}>
       {tier.tier}{!compact && <span className="font-normal opacity-80"> · {record}</span>}
     </Badge>
+  );
+}
+
+/** Symbols next to a player's name: $ = Edge (beats the best book price), hourglass = Due (fewer TDs than his chances earned). */
+export function SignalIcons({ edge, due, className }: { edge?: Edge | null; due?: Due | null; className?: string }) {
+  if (!edge && !due) return null;
+  const price = (p: number) => (p > 0 ? `+${p}` : String(p));
+  return (
+    <span className={cn("inline-flex shrink-0 items-center gap-0.5 align-middle", className)}>
+      {edge && <span role="img" aria-label="Edge" title={`Edge: our ${pct(edge.chance, 0)} vs ${pct(edge.implied, 0)} implied by ${price(edge.price)} (${edge.book}), +${Math.round(edge.edge * 100)} pts`}>
+        <CircleDollarSign className="h-3.5 w-3.5 text-accent" /></span>}
+      {due && <span role="img" aria-label="Due" title={`Due: ${due.actual} TD${due.actual === 1 ? "" : "s"} on ${num(due.expected, 1)} expected from his opportunities in ${due.games} games`}>
+        <Hourglass className="h-3.5 w-3.5 text-warn" /></span>}
+    </span>
   );
 }

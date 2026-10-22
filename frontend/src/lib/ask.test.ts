@@ -33,6 +33,8 @@ describe("ask parser", () => {
     ["what can you do", "help"],
     ["Who will fall short this week?", "unders"],
     ["best unders for receivers", "unders"],
+    ["who is due for a TD", "due"],
+    ["any unlucky receivers due to bounce back", "due"],
   ])("%s -> %s", (q, intent) => expect(parse(d, q).intent).toBe(intent));
 
   it("reads filters, counts and lines", () => {
@@ -52,6 +54,13 @@ describe("ask parser", () => {
   it("limits a one-team question to that team and a matchup to that game", () => {
     expect(answer(d, "who scores for the bears").picks?.map((p) => p.team)).toEqual(["CHI"]);
     expect(answer(d, "patriots bears").groups?.[0].picks.map((p) => p.name)).toEqual(["D'Andre Swift", "Rhamondre Stevenson"]);
+  });
+
+  it("flags due players from expected vs actual TDs", () => {
+    const due = { ...d, td: d.td.map((r) => (r.player_id === "6" ? { ...r, features: { cur_xtd: 3.4, cur_tds: 1, n_games_cur: 6 } } : r)) };
+    const a = answer(due, "who is due for a touchdown");
+    expect(a.picks?.map((p) => p.name)).toEqual(["George Pickens"]);
+    expect(a.picks?.[0].due?.gap).toBeCloseTo(2.4);
   });
 
   it("uses same-game legs when only one game matches", () => {
