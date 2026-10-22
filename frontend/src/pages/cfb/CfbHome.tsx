@@ -2,10 +2,10 @@ import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { MessageCircleQuestion } from "lucide-react";
 import { pct } from "@/lib/format";
-import { MARKET_LABEL, dayOf, fmtLine, kick, useCfb, type Backtest, type CfbGame, type CfbStatus, type Week } from "@/lib/cfb";
+import { MARKET_LABEL, dayOf, fmtLine, fmtPrice, kick, useCfb, type Backtest, type CfbGame, type CfbStatus, type Week } from "@/lib/cfb";
 import { PageTitle } from "@/components/Layout";
-import { Card, CardBody, CardHeader, Input, LoadingBlock, Notice, Segmented } from "@/components/ui";
-import { LeanRow, Matchup, NotPublished } from "./shared";
+import { Badge, Card, CardBody, CardHeader, Input, LoadingBlock, Notice, Segmented } from "@/components/ui";
+import { LeanRow, Matchup, NotPublished, roiText } from "./shared";
 
 export default function CfbHome() {
   const week = useCfb<Week>("week.json");
@@ -46,10 +46,13 @@ export default function CfbHome() {
         </Card>
       )}
 
+      {w && <UpsetWatch games={w.games} bt={bt.data} />}
+
       {bt.data && (
         <Notice title="What the backtest says">
           Game totals are where the model earns its keep{strong ? ` (${pct(strong.rate, 1)} at the closing line, better at the opening line, so bet totals early in the week)` : ""}.
-          Closing spreads and moneylines were too sharp: no tier beat the price over {bt.data.first_season}-{bt.data.last_season}, so they are shown as leans, never as picks.
+          {bt.data.upsets?.value_bets ? ` Underdog moneylines where the model's win chance clearly beats the price returned ${roiText(bt.data.upsets.value_bets.roi)} per bet, with losing seasons along the way.` : ""}
+          {" "}Closing spreads were too sharp: no tier beat the price over {bt.data.first_season}-{bt.data.last_season}, so they are shown as leans, never as picks.
           {" "}<Link to="/cfb/research" className="text-accent hover:underline">See the research</Link>
         </Notice>
       )}
@@ -98,5 +101,41 @@ function GameLine({ g }: { g: CfbGame }) {
         {tot && <div className={tot.proven ? "text-ok" : ""}>{tot.side === "over" ? "Over" : "Under"} {tot.line} <b className="text-fg">{tot.score.toFixed(1)}</b></div>}
       </div>
     </Link>
+  );
+}
+
+/** Underdogs the model gives a real chance, best first. "Upset pick" only when the proven moneyline value tier backs the dog. */
+function UpsetWatch({ games, bt }: { games: CfbGame[]; bt?: Backtest }) {
+  const dogs = games.filter((g) => g.upset && (g.upset.pick || g.upset.p >= 0.3))
+    .sort((a, b) => Number(b.upset!.pick) - Number(a.upset!.pick) || b.upset!.p - a.upset!.p).slice(0, 8);
+  const vb = bt?.upsets?.value_bets;
+  return (
+    <Card>
+      <CardHeader title="Upset watch"
+        subtitle={vb ? `Underdogs with the best chance to win outright. Upset picks are dogs priced well below the model's chance: that tier returned ${roiText(vb.roi)} over ${vb.n.toLocaleString()} bets (${pct(vb.win, 0)} won), not every season.`
+          : "Underdogs with the best chance to win outright, from 5,000 simulated games."} />
+      <div className="divide-y divide-line/60">
+        {dogs.map((g) => {
+          const u = g.upset!;
+          const edge = u.market == null ? null : u.p - u.market;
+          return (
+            <Link key={g.game_id} to={`/cfb/game/${g.game_id}`} className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-raised/50">
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold">{u.team} to win{u.price != null ? ` ${fmtPrice(u.price)}` : ""}</div>
+                <div className="text-xs text-muted"><Matchup g={g} /> · {kick(g.date)}</div>
+              </div>
+              <div className="text-right">
+                <div><b className="text-base">{pct(u.p, 0)}</b> <span className="text-xs text-muted">model</span></div>
+                <div className="flex items-center justify-end gap-1 text-xs text-muted">
+                  {u.market != null && <span>market {pct(u.market, 0)}{edge != null && edge > 0 ? ` (+${(edge * 100).toFixed(0)})` : ""}</span>}
+                  {u.pick && <Badge tone="ok" title="The proven moneyline value tier is on this underdog">Upset pick</Badge>}
+                </div>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+      {!dogs.length && <CardBody className="text-sm text-muted">No underdog has a 30%+ chance this week, or lines are not posted yet.</CardBody>}
+    </Card>
   );
 }

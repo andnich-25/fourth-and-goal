@@ -127,3 +127,29 @@ def test_frozen_picks_are_graded_at_their_line(tmp_path, monkeypatch):
     won = {r["market"]: r["won"] for r in rec["recent"]} | {r["market"]: r["rate"] for r in rec["by_market_tier"]}
     assert rec["picks"] == 4 and rec["suggested"] == {"n": 1, "hits": 1, "rate": 1.0}
     assert won["spread"] == 0.0 and won["total"] == 1 and won["team_total"] == 0.0 and won["moneyline"] == 0.0
+
+
+def test_qb_change_flags_a_new_passer_in_the_last_game():
+    rows = [(g, "Starter", 30) for g in (1, 2, 3)] + [(4, "Backup", 28), (4, "Starter", 3)]
+    pg = pd.DataFrame([{"season": 2026, "team_id": 9, "game_id": g, "athlete_name": n, "pass_att": a} for g, n, a in rows])
+    assert pipeline.qb_changes(pg, 2026) == {9: {"season_leader": "Starter", "last_game": "Backup"}}
+    assert pipeline.qb_changes(pg[pg.game_id < 4], 2026) == {}
+
+
+def test_postgame_resim_scores_more_for_the_offense_that_played_better():
+    rng = np.random.default_rng(3)
+    n = 1200
+    d = pd.DataFrame({f"{s}_{k}": rng.normal(m, sd, n) for s in ("home", "away")
+                      for k, m, sd in (("ypp", 5.8, 1.2), ("plays", 70, 8), ("to", 1.5, 1.0),
+                                       ("epa", 0.05, 0.15), ("sr", 0.42, 0.06), ("expl", 0.07, 0.03))})
+    for s in ("home", "away"):
+        d[f"{s}_points"] = (d[f"{s}_ypp"] * d[f"{s}_plays"] / 14 + 40 * d[f"{s}_epa"] - 3 * d[f"{s}_to"]).round()
+    d["final"] = True
+    d["date"] = pd.Timestamp("2026-09-01") - pd.to_timedelta(np.arange(n) % 700, unit="D")
+    box = model.fit_box(d, pd.Timestamp("2026-10-01"))
+    game = d.head(1).copy()
+    game[["home_ypp", "home_epa", "home_to"]] = [7.5, 0.35, 0]
+    game[["away_ypp", "away_epa", "away_to"]] = [4.0, -0.25, 3]
+    pool = np.zeros((10, 2))
+    out = model.postgame(box, game, pool)
+    assert out.post_margin.iloc[0] > 20 and abs(out.post_total.iloc[0] - (out.post_home + out.post_away).iloc[0]) < 1e-9

@@ -107,6 +107,7 @@ def live_lines(today: str) -> dict:
             "fetched_at": fetched.get(gid) or (json.loads(sb.read_text()).get("fetched_at") if sb else None),
             "offers": ls, "team_totals": tts.get(gid, []), "props": prs.get(gid, []),
             "home_rank": e.get("home_rank"), "away_rank": e.get("away_rank"), "tv": e.get("tv"),
+            "espn_spread": e.get("home_spread"),
         }
         out[gid] = row
     return out
@@ -129,8 +130,9 @@ def tier_of(tiers: list[dict], p: float, key: str = "p") -> dict | None:
     return None
 
 
-def game_rows(up: pd.DataFrame, ch: dict, summary: dict, lines: dict) -> list[dict]:
+def game_rows(up: pd.DataFrame, ch: dict, summary: dict, lines: dict, qb: dict | None = None) -> list[dict]:
     mk = summary["markets"]
+    qb = qb or {}
     rows = []
     for i, g in enumerate(up.itertuples()):
         L = lines.get(g.game_id, {})
@@ -182,6 +184,22 @@ def game_rows(up: pd.DataFrame, ch: dict, summary: dict, lines: dict) -> list[di
                             "proven": bool(t and t["proven"] and in_range), "best": bh if home else ba})
         for m in markets:
             m["score"] = round(m["p"] * 10, 1)
+        upset = None
+        if g.ml_home == g.ml_home and g.ml_away == g.ml_away:
+            ih, ia = history.implied(np.array([g.ml_home, g.ml_away], float))
+            fair_h = ih / (ih + ia)
+            dog_home = fair_h < 0.5
+            ph = float(ch["p_home_win"][i])
+            ml = next((m for m in markets if m["market"] == "moneyline"), None)
+            upset = {"team": g.home_team if dog_home else g.away_team, "side": "home" if dog_home else "away",
+                     "p": ph if dog_home else 1 - ph, "market": fair_h if dog_home else 1 - fair_h,
+                     "price": int(g.ml_home if dog_home else g.ml_away),
+                     "pick": bool(ml and ml["proven"] and ml["side"] == ("home" if dog_home else "away"))}
+        elif g.spread == g.spread and g.spread != 0:
+            dog_home = g.spread > 0
+            ph = float(ch["p_home_win"][i])
+            upset = {"team": g.home_team if dog_home else g.away_team, "side": "home" if dog_home else "away",
+                     "p": ph if dog_home else 1 - ph, "market": None, "price": None, "pick": False}
         rows.append({
             "game_id": int(g.game_id), "date": g.date.isoformat() + "Z", "week": int(g.week), "season_type": g.season_type,
             "home": g.home_team, "away": g.away_team, "home_id": int(g.home_id), "away_id": int(g.away_id),
@@ -195,14 +213,18 @@ def game_rows(up: pd.DataFrame, ch: dict, summary: dict, lines: dict) -> list[di
                       "total": float(g.pred_total), "margin_q": ch["margin_q"][i], "total_q": ch["total_q"][i],
                       "home_win": float(ch["p_home_win"][i]), "line_based": bool(g.spread == g.spread)},
             "ratings": {"home": _team_rating(g, "home"), "away": _team_rating(g, "away")},
-            "markets": markets,
+            "markets": markets, "upset": upset,
+            "notes": [f"Quarterback change? {team}'s last game was led by {qb[tid]['last_game']}, not season leader "
+                      f"{qb[tid]['season_leader']}. Ratings lean on earlier games, so check the starter before betting."
+                      for tid, team in ((int(g.home_id), g.home_team), (int(g.away_id), g.away_team)) if tid in qb],
         })
     return rows
 
 
 def _team_rating(g, side: str) -> dict:
     return {"pts_for": getattr(g, f"r_{side}"), "ypp": getattr(g, f"y_{side}", None), "plays": getattr(g, f"n_{side}", None),
-            "games": getattr(g, f"{side}_games", None)}
+            "epa": getattr(g, f"e_{side}", None), "success": getattr(g, f"s_{side}", None), "turnovers": getattr(g, f"t_{side}", None),
+            "explosive": getattr(g, f"x_{side}", None), "games": getattr(g, f"{side}_games", None)}
 
 
 def reasons(row: dict, m: dict) -> list[str]:
@@ -227,12 +249,23 @@ def reasons(row: dict, m: dict) -> list[str]:
     elif m["market"] == "moneyline":
         out.append(f"{m['team']} wins {m['p'] * 100:.0f}% of 5,000 simulated games; at {m['price']:+d} that is "
                    f"{m['ev'] * 100:+.1f} cents per dollar.")
+        r = row["ratings"]["home" if m["side"] == "home" else "away"]
+        o = row["ratings"]["away" if m["side"] == "home" else "home"]
+        if r.get("epa") is not None and o.get("epa") is not None and r["epa"] > o["epa"]:
+            out.append(f"{m['team']} has the better opponent-adjusted offense by EPA per play ({r['epa']:+.2f} vs {o['epa']:+.2f}).")
+        if m["price"] > 0:
+            out.append("Underdog value bets like this returned about 4 cents per dollar since 2016, with losing seasons mixed in.")
     return out
 
 
 # --------------------------------------------------------------------------- frozen picks and the live record
-def freeze(rows: list[dict], now: datetime) -> dict:
-    """Save each game's leans once, on the last run before kickoff (within FREEZE_HOURS). Never overwritten."""
+def freeze(rows: list[dict], now: datetime, props_rows: list[dict] | None = None) -> dict:
+    """Save each game's leans, projected score and player-prop projections once, on the last run before kickoff
+    (within FREEZE_HOURS). Never overwritten, so the report card compares what we said before the game."""
+    by_game: dict = {}
+    for p in props_rows or []:
+        by_game.setdefault(p["game_id"], []).append({k: p[k] for k in ("player", "player_id", "team", "market", "mean", "line",
+                                                                         "line_source", "p_over", "side", "p", "tier", "proven")})
     d = sources.archive_dir() / "picks"
     d.mkdir(parents=True, exist_ok=True)
     frozen = 0
@@ -245,7 +278,8 @@ def freeze(rows: list[dict], now: datetime) -> dict:
             continue
         f.write_text(json.dumps(_clean({"game_id": r["game_id"], "date": r["date"], "home": r["home"], "away": r["away"],
                                         "frozen_at": utcnow(), "line": r["line"], "featured": r["featured"],
-                                        "markets": r["markets"]})))
+                                        "model": r["model"], "ratings": r.get("ratings"), "notes": r.get("notes", []), "markets": r["markets"],
+                                        "props": by_game.get(r["game_id"], [])})))
         frozen += 1
     return {"frozen": frozen}
 
@@ -295,6 +329,134 @@ def record(g: pd.DataFrame, summary: dict) -> dict:
             "by_market_tier": by,
             "suggested": {"n": int(len(pk)), "hits": int(pk.won.sum()), "rate": float(pk.won.mean()) if len(pk) else None},
             "recent": r[r.proven].sort_values("date", ascending=False).head(40).to_dict("records")}
+
+
+INPUT_LABELS = {"plays": ("plays", "Pace (plays)"), "ypp": ("ypp", "Yards per play"), "turnovers": ("to", "Turnovers"),
+                "epa": ("epa", "EPA per play"), "success": ("sr", "Success rate"), "explosive": ("expl", "Explosive-play rate")}
+
+
+def report_card(g: pd.DataFrame, pg: pd.DataFrame, box=None, pool: np.ndarray | None = None) -> dict:
+    """After the games: how far the frozen projections were from what happened, next to how far the book's line
+    was. Scores (margin, total) and player props. The weekly refits learn from the same results automatically
+    (every new final joins the ratings and the model's training data); this card is how we watch that working."""
+    files = sorted((sources.archive_dir() / "picks").glob("*.json")) if (sources.archive_dir() / "picks").exists() else []
+    fin = g[g.final].set_index("game_id")
+    games, prow = [], []
+    actual = {}
+    if not pg.empty:
+        for r in pg.itertuples():
+            actual[(int(r.game_id), str(int(r.athlete_id)))] = r
+    for fp in files:
+        s = json.loads(fp.read_text())
+        gid = int(s["game_id"])
+        if gid not in fin.index or not s.get("model"):
+            continue
+        x = fin.loc[gid]
+        margin, total = float(x.home_points - x.away_points), float(x.home_points + x.away_points)
+        ln = s["line"]
+        row = {"game_id": gid, "date": s["date"][:10], "label": f"{s['away']} at {s['home']}",
+               "model_margin": s["model"]["margin"], "line_margin": -ln["spread"] if ln.get("spread") is not None else None,
+               "margin": margin, "model_total": s["model"]["total"], "line_total": ln.get("total"), "total": total}
+        # pregame expectation of each input vs what the game produced
+        for key, (stat, _) in INPUT_LABELS.items():
+            for side in ("home", "away"):
+                pre = (s.get("ratings") or {}).get(side, {}).get(key)
+                act = x.get(f"{side}_{stat}")
+                if pre is not None and act == act and act is not None:
+                    row[f"err_{key}_{side}"] = float(act) - float(pre)
+        games.append(row)
+        for p in s.get("props", []):
+            a = actual.get((gid, str(p["player_id"])))
+            if a is None:
+                continue
+            y = float(getattr(a, p["market"]))
+            prow.append({"market": p["market"], "mean": p["mean"], "line": p["line"], "line_source": p["line_source"], "y": y,
+                         "hit": int((y > p["line"]) == (p["side"] == "over")) if y != p["line"] else None})
+    if not games:
+        return {"games": 0, "note": "Fills in after the first graded week: each game's frozen projection next to the final."}
+    d = pd.DataFrame(games)
+    resim = None
+    if box is not None and pool is not None:
+        pgm = model.postgame(box, fin.loc[d.game_id].reset_index(), pool)
+        if len(pgm):
+            d = d.merge(pgm[["game_id", "post_margin", "post_total"]], on="game_id", how="left")
+            k = d[d.post_total.notna()]
+            resim = {"games": int(len(k)),
+                     "total_input_miss": float((k.post_total - k.model_total).abs().mean()),
+                     "total_rest_miss": float((k.total - k.post_total).abs().mean()),
+                     "margin_input_miss": float((k.post_margin - k.model_margin).abs().mean()),
+                     "margin_rest_miss": float((k.margin - k.post_margin).abs().mean()),
+                     "games_list": k.assign(gap=(k.post_total - k.model_total).abs()).sort_values("gap", ascending=False)
+                                   .head(8)[["label", "date", "model_total", "post_total", "total",
+                                             "model_margin", "post_margin", "margin"]].to_dict("records")}
+    inputs = []
+    for key, (_, label) in INPUT_LABELS.items():
+        cols = [c for c in (f"err_{key}_home", f"err_{key}_away") if c in d]
+        if cols:
+            e = pd.concat([d[c] for c in cols]).dropna()
+            if len(e):
+                inputs.append({"input": label, "n": int(len(e)), "bias": float(e.mean()), "mae": float(e.abs().mean())})
+    out = {"games": int(len(d)), "resim": resim, "inputs": inputs,
+           "margin": {"model_mae": float((d.model_margin - d.margin).abs().mean()),
+                      "line_mae": float((d.line_margin - d.margin).abs().mean()) if d.line_margin.notna().any() else None},
+           "total": {"model_mae": float((d.model_total - d.total).abs().mean()),
+                     "line_mae": float((d.line_total - d.total).abs().mean()) if d.line_total.notna().any() else None},
+           "by_week": [{"date": dt, "n": int(len(x)), "margin_mae": float((x.model_margin - x.margin).abs().mean()),
+                        "total_mae": float((x.model_total - x.total).abs().mean())}
+                       for dt, x in d.assign(wk=pd.to_datetime(d.date).dt.to_period("W").astype(str)).groupby("wk")],
+           "biggest_misses": d.assign(miss=(d.model_total - d.total).abs()).sort_values("miss", ascending=False)
+                              .head(5)[["label", "date", "model_total", "total", "model_margin", "margin"]].to_dict("records")}
+    if prow:
+        p = pd.DataFrame(prow)
+        out["props"] = [{"market": m, "label": props.MARKETS[m], "n": int(len(x)), "model_mae": float((x["mean"] - x.y).abs().mean()),
+                         "line_mae": float((x.line - x.y).abs().mean()), "hit": float(x.hit.dropna().mean()) if x.hit.notna().any() else None}
+                        for m, x in p.groupby("market")]
+    return out
+
+
+def cross_checks(g: pd.DataFrame, lines: dict, rows: list[dict], upcoming: pd.Series) -> list[dict]:
+    """Data checks run every build and shown on the research page: sources that disagree or are missing."""
+    out = []
+    cur = g[(g.season == sources.CURRENT_SEASON) & g.final & g.fbs_game]
+    for col, name in (("home_ypp", "ESPN team box score"), ("home_epa", "play-by-play summary"), ("spread", "closing line")):
+        if col in cur:
+            miss = int(cur[col].isna().sum())
+            out.append({"check": f"Finished FBS games this season with a {name}", "value": f"{len(cur) - miss} of {len(cur)}",
+                        "ok": miss <= max(5, 0.05 * len(cur))})
+    if "home_ypp" in cur and "home_epa" in cur:
+        both = cur[cur.home_ypp.notna() & cur.home_epa.notna()]
+        if len(both) > 20:
+            c = float(np.corrcoef(both.home_ypp, both.home_epa)[0, 1])
+            out.append({"check": "Box-score yards per play agrees with play-by-play EPA (correlation)", "value": f"{c:.2f}", "ok": c > 0.5})
+    gap = []
+    for gid, L in lines.items():
+        books = [o["point"] for o in L.get("offers", []) if o["market"] == "spreads" and o["side"] == "home" and o["point"] is not None]
+        espn = None
+        if books and L.get("espn_spread") is not None:
+            espn = L["espn_spread"]
+            if abs(float(np.median(books)) - espn) >= 2.5:
+                gap.append(gid)
+    out.append({"check": "Games where ESPN's spread and the sportsbooks' differ by 2.5+ points", "value": str(len(gap)), "ok": len(gap) <= 3,
+                "games": gap[:10]})
+    no_line = sum(1 for r in rows if not r["line"]["has_line"])
+    out.append({"check": "This week's games without a posted line yet", "value": f"{no_line} of {len(rows)}", "ok": True})
+    return out
+
+
+def qb_changes(pg: pd.DataFrame, season: int) -> dict:
+    """Teams whose passer in their last game is not the one who has thrown the most this season: a likely
+    quarterback change (injury or benching) that older ratings have not caught up with."""
+    if pg.empty:
+        return {}
+    p = pg[(pg.season == season) & (pg.pass_att >= 5)]
+    out = {}
+    for tid, x in p.groupby("team_id"):
+        lead = x.groupby("athlete_name").pass_att.sum().idxmax()
+        last_gid = x.game_id.max()
+        last = x[x.game_id == last_gid].sort_values("pass_att", ascending=False).athlete_name.iloc[0]
+        if last != lead and x.game_id.nunique() >= 3:
+            out[int(tid)] = {"season_leader": lead, "last_game": last}
+    return out
 
 
 # --------------------------------------------------------------------------- teams
@@ -423,6 +585,7 @@ def run(out: Path, log=print, today: str | None = None, now: datetime | None = N
     t0 = datetime.now(timezone.utc)
     g = history.load_games()
     g = g.merge(history.load_team_box(), on="game_id", how="left")
+    g = g.merge(history.load_pbp_stats(), on="game_id", how="left")
     lines = live_lines(today)
     # this week's games take the live line (closing lines arrive upstream after the games)
     nowts = pd.Timestamp(now.replace(tzinfo=None))
@@ -436,6 +599,7 @@ def run(out: Path, log=print, today: str | None = None, now: datetime | None = N
     bt = report.simulate_backtest(oos)
     summary = report.summarize(bt)
     opening = report.opening_totals(oos, bt)
+    upset = report.upsets(bt)
     finds = report.findings(g)
     for m, v in summary["markets"].items():
         log(f"cfb backtest {m}: proven tiers {[t['tier'] for t in v['tiers'] if t['proven']]}")
@@ -462,7 +626,8 @@ def run(out: Path, log=print, today: str | None = None, now: datetime | None = N
         sp = up.spread.fillna(0.5).to_numpy()
         tot = up.total.fillna(50.5).to_numpy()
         ch = model.chances(h, a, sp, tot, up.tt_home.fillna(0).to_numpy(), up.tt_away.fillna(0).to_numpy())
-        rows = game_rows(up, ch, summary, lines)
+        qb = qb_changes(props.load_player_games(sources.CURRENT_SEASON), sources.CURRENT_SEASON)
+        rows = game_rows(up, ch, summary, lines, qb)
         for r in rows:
             for m in r["markets"]:
                 m["reasons"] = reasons(r, m)
@@ -471,8 +636,11 @@ def run(out: Path, log=print, today: str | None = None, now: datetime | None = N
             props_rows, prop_tiers = prop_rows(g, oos, up, featured, lines, log=log)
         except Exception as ex:  # noqa: BLE001 - props are a side dish; the game lines still publish
             log(f"cfb props: skipped ({ex})")
-    frozen = freeze(rows, now)
+    frozen = freeze(rows, now, props_rows)
     rec = record(g, summary)
+    pg_now = props.load_player_games(sources.CURRENT_SEASON)
+    card = report_card(g, pg_now, model.fit_box(g, nowts), model.miss_pool(oos, nowts))
+    checks = cross_checks(g, lines, rows, upcoming)
     teams = team_table(g, sources.CURRENT_SEASON)
 
     picks = [{"game_id": r["game_id"], "date": r["date"], "home": r["home"], "away": r["away"], **m}
@@ -484,11 +652,12 @@ def run(out: Path, log=print, today: str | None = None, now: datetime | None = N
                                        "espn_games": sum(1 for r in rows if (r["line"]["source"] or "").startswith("ESPN")),
                                        "no_line": sum(1 for r in rows if not r["line"]["has_line"])}})
     _write(out, "props.json", {"generated_at": utcnow(), "rows": props_rows, "backtest": prop_tiers})
-    _write(out, "backtest.json", {**summary, "opening_totals": opening, "coefficients": coefs,
+    _write(out, "backtest.json", {**summary, "opening_totals": opening, "upsets": upset,
+                                  "coefficients": coefs,
                                   "model": {"ratings_half_life_days": model.RATINGS[0][3],
                                             "recency_half_life_seasons": model.RECENCY_HALF_LIFE, "sims": model.SIMS}})
     _write(out, "findings.json", {"rules": finds, "break_even": report.BREAK_EVEN})
-    _write(out, "record.json", rec)
+    _write(out, "record.json", {**rec, "report_card": card})
     _write(out, "teams.json", {"season": sources.CURRENT_SEASON, "teams": teams})
     fin = g[g.final]
     status = {"generated_at": utcnow(), "seconds": (datetime.now(timezone.utc) - t0).total_seconds(),
@@ -497,6 +666,7 @@ def run(out: Path, log=print, today: str | None = None, now: datetime | None = N
               "history": {"first_season": int(fin.season.min()), "games": int(len(fin)),
                           "lined_games": int((fin.spread.notna()).sum()), "last_game_date": str(fin.date.max().date())},
               "proven": {m: [t["tier"] for t in v["tiers"] if t["proven"]] for m, v in summary["markets"].items()},
+              "checks": checks,
               "license": sources.LICENSE_NOTE}
     _write(out, "status.json", status)
     log(f"cfb: wrote site data ({len(rows)} games, {len(picks)} picks, {len(props_rows)} prop rows) in {status['seconds']:.0f}s")

@@ -19,8 +19,9 @@ record. College football research, not betting advice. No pick is guaranteed.
 
 ## The model
 
-* **Ratings**, refit before every week on earlier games only: opponent-adjusted points, yards per play, plays (pace)
-  and turnovers, each a ridge solve over every FBS/FCS team; a game's weight halves every 120 days.
+* **Ratings**, refit before every week on earlier games only: opponent-adjusted points, yards per play, plays (pace),
+  turnovers and, from play-by-play with garbage time removed, EPA per play, success rate and explosive-play rate
+  (summarized per game by the collector, `pbp_stats_{year}.csv`), each a ridge solve over every FBS/FCS team; a game's weight halves every 120 days.
 * **Game model**: the ratings and the posted line become an expected margin and total (ridge regression refit every
   week; a season's weight halves every two seasons, so the last two count most).
 * **Simulation**: each game is played 5,000 times with pairs of real misses from about the last two seasons. Every
@@ -28,12 +29,29 @@ record. College football research, not betting advice. No pick is guaranteed.
 
 ## What testing found (2016 on, every game simulated with the model as it stood that week)
 
-* **Game totals** are the market the model beats: the Strong tier (54%+) hit 53.5% at the closing total and about 59%
+* **Game totals** are the market the model beats: the Strong tier (54%+) hit 53.0% at the closing total and about 59%
   at the opening total, so totals are best bet early in the week.
-* **Spreads and moneylines**: no tier beat the price at the close, so they are shown as leans, never as picks.
-* **Team totals**: tested only at implied lines (old team-total lines were never archived); no proven tier.
+* **Underdog moneylines (upsets)**: the model's underdog win chances match how often dogs really won. Betting the
+  moneyline only when the model's chance beats the price by 4+ points (the Value tier, 89% underdogs) returned +4.1%
+  per bet over 1,504 bets, profitable in 7 of 9 seasons (2024 lost 19.8%); 90% range -1.8% to +9.8%. The home page's
+  Upset watch lists the likeliest upsets and marks the ones in that tier.
+* **Spreads**: no tier beat the price at the close, so they are shown as leans, never as picks. Elo, line moves and a
+  separate upset model added nothing over the market.
+* **Team totals**: tested only at implied lines (old team-total lines were never archived), so they are picks only
+  when a book posts the line.
 * A tier is a pick only if it beat 52.4% (the -110 break-even) over the whole test, did not lose over the last two
   seasons, and every stronger tier passed too. Props are picks only at book-posted lines.
+
+## Checking itself
+
+* **Data checks** every run (Research page): finished games missing a box score, play-by-play or closing line;
+  box-score yards vs play-by-play EPA; ESPN's spread vs the sportsbooks'; games without a line yet.
+* **Before the game**: quarterback-change warnings when a team's last passer is not its season leader.
+* **After the game**: every frozen projection is compared with the final and with the book's line (props too), and the
+  game is simulated 5,000 times again from what each offense actually did (a box-score-to-points model fit on the last
+  three seasons). Pregame vs post-game sim = how far the inputs were off; post-game sim vs final = what no input
+  explains. Per-input bias (pace, yards per play, turnovers, EPA, success, explosives) shows which inputs are skewed.
+  Every final then joins the next week's refit.
 
 ## Odds API budget
 

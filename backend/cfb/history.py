@@ -15,7 +15,7 @@ from . import sources
 
 SCHED_COLS = ["game_id", "season", "week", "season_type", "start_date", "completed", "neutral_site", "conference_game",
               "home_id", "home_team", "home_division", "home_conference", "home_points", "away_id", "away_team",
-              "away_division", "away_conference", "away_points", "venue", "notes"]
+              "away_division", "away_conference", "away_points", "venue", "notes", "home_pregame_elo", "away_pregame_elo"]
 DIVISIONS = {"fbs", "fcs"}
 
 
@@ -168,3 +168,42 @@ def load_team_box(first: int = sources.FIRST_SEASON, last: int = sources.CURRENT
     w = w.reset_index()
     w["game_id"] = w.game_id.astype("int64")
     return w
+
+
+PBP_COLS = ["game_id", "period", "pos_team", "home", "home_team_id", "away_team_id", "pos_team_score", "def_pos_team_score",
+            "rush", "pass", "EPA", "success", "yards_gained"]
+
+
+def aggregate_pbp(path) -> pd.DataFrame:
+    """Per game and side, offense only, from cfbfastR play-by-play: EPA per play (all, rushing, passing), success
+    rate and explosive-play rate (20+ yards). Garbage time is left out (second half with a lead of 28+, or fourth
+    quarter with 22+), when starters sit and the numbers stop meaning much."""
+    import pyarrow.parquet as pq  # noqa: PLC0415
+
+    names = set(pq.read_schema(path).names)
+    d = pd.read_parquet(path, columns=[c for c in PBP_COLS if c in names])
+    d = d[(d.rush.fillna(0) == 1) | (d["pass"].fillna(0) == 1)]
+    d = d[d.EPA.notna()]
+    lead = (d.pos_team_score - d.def_pos_team_score).abs()
+    d = d[~(((d.period >= 3) & (lead >= 28)) | ((d.period >= 4) & (lead >= 22)))]
+    d = d.assign(side=np.where(d.pos_team == d.home, "home", "away"),
+                 explosive=(d.yards_gained >= 20).astype(float),
+                 epa_rush=d.EPA.where(d.rush == 1), epa_pass=d.EPA.where(d["pass"] == 1))
+    a = d.groupby(["game_id", "side"]).agg(epa=("EPA", "mean"), sr=("success", "mean"), expl=("explosive", "mean"),
+                                           epa_rush=("epa_rush", "mean"), epa_pass=("epa_pass", "mean"),
+                                           pbp_plays=("EPA", "size"))
+    a = a[a.pbp_plays >= 25].unstack("side")
+    a.columns = [f"{side}_{m}" for m, side in a.columns]
+    a = a.reset_index()
+    a["game_id"] = a.game_id.astype("int64")
+    return a
+
+
+def load_pbp_stats(first: int = sources.FIRST_SEASON, last: int = sources.CURRENT_SEASON) -> pd.DataFrame:
+    """Saved per-game efficiency (written by the collector from each season's play-by-play)."""
+    frames = []
+    for yr in range(first, last + 1):
+        p = sources.raw_dir() / sources.local_name("pbp_stats", yr)
+        if p.exists():
+            frames.append(pd.read_csv(p))
+    return pd.concat(frames, ignore_index=True).drop_duplicates("game_id") if frames else pd.DataFrame(columns=["game_id"])
