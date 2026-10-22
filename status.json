@@ -1,0 +1,89 @@
+{
+  "date": "2026-10-22",
+  "ran_at": "2026-10-22T13:26:59+00:00",
+  "files": [
+    {
+      "file": "player_box_2019.csv",
+      "status": "downloaded",
+      "bytes": 16423678
+    },
+    {
+      "file": "player_box_2020.csv",
+      "status": "downloaded",
+      "bytes": 14334441
+    },
+    {
+      "file": "player_box_2021.csv",
+      "status": "downloaded",
+      "bytes": 16122075
+    },
+    {
+      "file": "player_box_2022.csv",
+      "status": "downloaded",
+      "bytes": 17355393
+    },
+    {
+      "file": "player_box_2023.csv",
+      "status": "downloaded",
+      "bytes": 17431336
+    },
+    {
+      "file": "player_box_2024.csv",
+      "status": "downloaded",
+      "bytes": 17930190
+    },
+    {
+      "file": "player_box_2025.csv",
+      "status": "downloaded",
+      "bytes": 17909380
+    },
+    {
+      "file": "player_box_2026.csv",
+      "status": "downloaded",
+      "bytes": 17729581
+    },
+    {
+      "file": "player_box_2027.csv",
+      "status": "downloaded",
+      "bytes": 196567
+    },
+    {
+      "file": "nba_schedule_2027.csv",
+      "status": "downloaded",
+      "bytes": 2144855
+    }
+  ],
+  "box_scores": {
+    "season": 2027,
+    "games": 14,
+    "player_rows": 322,
+    "last_game_date": "2026-10-21"
+  },
+  "espn": {
+    "injuries": {
+      "saved": "2026-10-22.json",
+      "items": 26
+    },
+    "scoreboard": {
+      "saved": "2026-10-22.json",
+      "items": 2
+    }
+  },
+  "odds": {
+    "saved": "2026-10-22.json",
+    "game_lines": 72,
+    "props": 0,
+    "budget": {
+      "plan": "free",
+      "allowance": 500.0,
+      "reserve": 200.0,
+      "game_lines": true,
+      "props": false,
+      "cost": 2,
+      "reason": "free plan: player props need a paid plan"
+    },
+    "credits_remaining": 416.0,
+    "errors": []
+  },
+  "license": "NBA box scores and schedules: sportsdataverse / hoopR (ESPN data), https://github.com/sportsdataverse/sportsdataverse-data. Injuries and scoreboard: ESPN public site feed."
+}
