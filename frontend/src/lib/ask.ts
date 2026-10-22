@@ -147,6 +147,45 @@ export function propPool(d: AskData, market: string, f: Filters = {}, side?: "ov
   return out.sort((a, b) => b.p - a.p);
 }
 
+/** The single most likely leg for each player across every market: anytime TD plus the likelier side of each prop.
+ *  Props use the book line once prices are loaded; before that, the player's usual line (marked as such). */
+export function anyPool(d: AskData, f: Filters = {}, markets?: string[]): Pick[] {
+  const all: Pick[] = [];
+  if (!markets || markets.includes("td")) all.push(...tdPool(d, f));
+  const priced = !!d.feed.at;
+  for (const m of markets?.filter((x) => x !== "td") ?? Object.keys(d.props)) {
+    for (const r of d.props[m]?.rows ?? []) {
+      if (!r.eligible || !r.dist) continue;
+      if (!keep(d, f, { pos: r.position, team: r.team, opp: r.opponent, game_id: r.game_id })) continue;
+      const book = feedLine(d.feed, m, r.player_id);
+      const line = book ?? (priced ? null : usualLine(r, m));
+      if (line == null) continue;
+      // Books set lines near the projection. A usual line far from this week's projection (a role change, a backup
+      // starting) is not a line anyone will offer, so it can't count as a "safe" pick.
+      if (book == null && Math.abs(r.median - line) > Math.max(1.5, 0.2 * Math.max(line, r.median))) continue;
+      const over = pOver(r.dist, line);
+      all.push({ ...propPick(d, m, r, line, over >= 0.5 ? "over" : "under"), lineSource: book != null ? "book" : "usual" });
+    }
+  }
+  const best = new Map<string, Pick>();
+  for (const p of all.sort((a, b) => b.p - a.p)) if (!best.has(p.player_id)) best.set(p.player_id, p);
+  return [...best.values()];
+}
+
+export function answerAny(d: AskData, n: number, f: Filters): Answer {
+  const picks = anyPool(d, f).slice(0, n);
+  if (!picks.length) return none(d, "No picks match that", f);
+  const usual = picks.some((p) => p.lineSource === "usual");
+  return {
+    title: `${picks.length === 1 ? "Safest pick" : `Safest ${picks.length} picks`} across every market${describe(f) ? ` (${describe(f)})` : ""}`,
+    summary: "The highest validated chance for each player across anytime TD and every prop market, one pick per player.",
+    picks, notes: [
+      ...(usual ? ["No book lines are loaded yet, so props are shown at each player's usual line (his recent median, rounded to a half point), and only where that line is close to this week's projection. Books may still set a different line, so check it before betting."] : []),
+      ...noteTier(picks), ...priceNote(d)],
+    followups: ["Build a 3-leg parlay from these", "Best value bets", "Who will fall short this week?"],
+  };
+}
+
 /* ------------------------------------------------------------------ answers (also the AI tools) */
 const describe = (f: Filters) => [f.position ? `${f.position}s` : "", f.teams?.length ? f.teams.join("/") : "",
   f.day != null ? Object.keys(DAYS).find((k) => DAYS[k] === f.day && k.length > 3) ?? "" : ""].filter(Boolean).join(", ");
@@ -168,16 +207,16 @@ export function answerTop(d: AskData, n: number, f: Filters): Answer {
 }
 
 export function answerPerGame(d: AskData, market: string, f: Filters): Answer {
-  const pool = market === "td" ? tdPool(d, f) : propPool(d, market, f);
+  const pool = market === "any" ? anyPool(d, f) : market === "td" ? tdPool(d, f) : propPool(d, market, f);
   const byGame = new Map<string, Pick>();
   for (const p of pool) if (!byGame.has(p.game_id)) byGame.set(p.game_id, p);
   const picks = [...byGame.values()].sort((a, b) => b.p - a.p);
   if (!picks.length) return none(d, market === "td" ? "No TD chances for these games" : `No ${(d.props[market] && lc(d.props[market].label)) ?? market} lines yet`, f);
   const sim = simulate(picks.map(toSim), d.buckets, d.useCorr, 20000);
-  const what = market === "td" ? "TD scorer" : `${(d.props[market] && lc(d.props[market].label))} pick`;
+  const what = market === "any" ? "pick (any market)" : market === "td" ? "TD scorer" : `${(d.props[market] && lc(d.props[market].label))} pick`;
   return {
     title: `Best ${what} from each game${describe(f) ? ` (${describe(f)})` : ""}`,
-    summary: `The single most likely ${market === "td" ? "scorer" : "leg"} in each of ${picks.length} games, strongest first.`,
+    summary: `The single most likely ${market === "td" ? "scorer" : market === "any" ? "leg across TD and every prop market" : "leg"} in each of ${picks.length} games, strongest first.`,
     picks, notes: [
       `Chance at least ${Math.ceil(picks.length / 2)} of ${picks.length} hit: ${pct(sim.hits.slice(Math.ceil(picks.length / 2)).reduce((a, b) => a + b, 0))}. ` +
       `All ${picks.length} together: ${(sim.joint * 100).toFixed(sim.joint < 0.01 ? 2 : 1)}% (so treat these as single bets, not one parlay).`,
@@ -499,7 +538,7 @@ export const EXAMPLES = [
   "How accurate is the model?",
 ];
 
-export type Parsed = { intent: string; n?: number; market?: string; side?: "over" | "under"; line?: number; filters: Filters; players: string[]; value: boolean; sameGame: boolean; ambiguous?: string[] };
+export type Parsed = { intent: string; n?: number; market?: string; anyMarket?: boolean; side?: "over" | "under"; line?: number; filters: Filters; players: string[]; value: boolean; sameGame: boolean; ambiguous?: string[] };
 
 // Last names that are also everyday words only count when capitalised ("Will Swift score?", not "likely to score").
 const COMMON = new Set(["likely", "love", "will", "hill", "white", "young", "brown", "rice", "cook", "best", "king", "price", "golden", "hunt",
@@ -550,6 +589,7 @@ export function parse(d: AskData, raw: string): Parsed {
 
   let market: string | undefined;
   for (const [m, re] of MARKET_WORDS) if (re.test(q)) { market = m; break; }
+  const anyMarket = !market && /\b(any|all|every|whatever) (props?|markets?|bets?|types?|stats?|kinds?|categor(y|ies))\b|\bany prop\b|\bacross (all )?(markets|props)\b|\b(doesnt|does not|dont) (have to|need to) be (a )?(td|touchdown)/.test(q);
   const td = /\b(tds?|touchdowns?|score|scores|scorer|scorers|scoring|anytime|find the end ?zone|endzone|end zone)\b/.test(q);
   if (td && market && !["pass_tds"].includes(market) && !/(yards|yds|receptions|catches|carries|completions|attempts)/.test(q)) market = undefined;
   const side = /\b(unders?|less than|fewer|stay under)\b/.test(q) ? "under" : /\b(overs?|more than|at least|go over|exceed)\b/.test(q) ? "over" : undefined;
@@ -565,13 +605,17 @@ export function parse(d: AskData, raw: string): Parsed {
     if (!market) line = undefined;
   }
   let n: number | undefined;
-  const dm = q.replace(lm?.[0] ?? "@@", " ").match(/\b(\d{1,2})\b/);
+  // "from all 14 games" sizes the slate, not the answer.
+  const qn = q.replace(lm?.[0] ?? "@@", " ").replace(/\b(all |the |of |these |this weeks )?(\d{1,2}|[a-z]+teen|ten|eleven|twelve) (games|matchups)\b/g, " ");
+  const dm = qn.match(/\b(\d{1,2})\b/);
   if (dm) n = Number(dm[1]);
-  else for (const [w, v] of Object.entries(NUM)) if (new RegExp(`\\b${w}\\b(?! (each|every|per)\\b)`).test(q) && w !== "a") { n = v; break; }
+  else for (const [w, v] of Object.entries(NUM)) if (new RegExp(`\\b${w}\\b(?! (each|every|per)\\b)`).test(qn) && w !== "a") { n = v; break; }
+  if (n == null && /\b(the|a|one|single) (single )?(safest|surest|best|most likely|top|strongest) (pick|bet|play|leg|prop|lock)\b(?!s)|\b(safest|surest) (pick|bet|play|leg|prop|lock)\b(?!s)/.test(qn)) n = 1;
   const value = /\b(value|edges?|ev|plus ev|\+ev|beat(ing)? the books?|mispriced|soft lines?|overlay|bang for)\b/.test(q);
   const sameGame = /\b(same ?game|sgp|in this game|in the game)\b/.test(q) || (teams.size > 0 && /\bparlay\b/.test(q));
   const pl = findPlayers(d, q, raw);
-  const base = { n, market, side: line != null && !side ? "over" as const : side, line, filters, players: pl.ids, value, sameGame, ambiguous: pl.ambiguous } as const;
+  const anyM = anyMarket || (!td && !market && /\b(safest|surest|most likely|best|strongest)\b/.test(q) && /\b(picks?|bets?|plays?|legs?|props?)\b/.test(q));
+  const base = { n, market, anyMarket: anyM, side: line != null && !side ? "over" as const : side, line, filters, players: pl.ids, value, sameGame, ambiguous: pl.ambiguous } as const;
 
   if (/\b(what can you|help me|how do i use|what do you know)\b/.test(q)) return { ...base, intent: "help" };
   if (/\b(accura|track record|hit rate|how good is (the|your) model|trust (the|your)|calibrat|how often .* (hit|right))/.test(q)) return { ...base, intent: "record" };
@@ -580,6 +624,7 @@ export function parse(d: AskData, raw: string): Parsed {
   if (/\b(each|every|per|all) (game|matchup|contest)s?\b|\bfrom every\b|\bgame by game\b|\beach of the games\b/.test(q)) return { ...base, intent: "pergame" };
   if (/\b(parlay|parlays|legs?|slip|accumulator|multi)\b/.test(q)) return { ...base, intent: "parlay" };
   if (/\b(fall short|come up short|struggle|won'?t (hit|reach|get)|held (in check|under)|shut ?down|bust|unders?)\b/.test(q) && !/\b(parlay|each|every)\b/.test(q)) return { ...base, intent: "unders" };
+  if (anyM && !/\b(parlay|parlays|value|unders?|fall short)\b/.test(q) && !pl.ids.length) return { ...base, intent: "any" };
   if (/\b(longshots?|long shots?|sleepers?|dark ?horse|big payout|plus money|underdogs? to score|lottery)\b/.test(q)) return { ...base, intent: "sleepers" };
   if (pl.ids.length && !/\b(top|best|safest|most likely|highest)\b/.test(q) && line == null) return { ...base, intent: "player" };
   if (/\b(due|overdue|bounce ?back|unlucky|positive regression|buy ?low)\b/.test(q) && !/\bparlay\b/.test(q)) return { ...base, intent: "due" };
@@ -599,10 +644,11 @@ export function answer(d: AskData, raw: string): Answer {
   switch (p.intent) {
     case "record": a = answerRecord(d); break;
     case "injuries": a = answerInjuries(d, f); break;
-    case "pergame": a = answerPerGame(d, p.market ?? "td", f); break;
+    case "pergame": a = answerPerGame(d, p.market ?? (p.anyMarket ? "any" : "td"), f); break;
     case "parlay": a = answerParlay(d, Math.min(Math.max(p.n ?? 3, 2), 8), f, { market: p.market, value: p.value, sameGame: p.sameGame }); break;
     case "sleepers": a = answerSleepers(d, p.n ?? 6, f); break;
     case "due": a = answerDue(d, p.n ?? 8, f); break;
+    case "any": a = answerAny(d, Math.min(p.n ?? 5, 25), f); break;
     case "player": a = answerPlayer(d, p.players.slice(0, 3), p.market ?? (/\b(td|touchdown|score)/.test(norm(raw)) ? "td" : undefined)); break;
     case "avoid": a = answerAvoid(d, p.n ?? 8, f); break;
     case "unders": a = p.line != null && p.market ? answerProps(d, p.market, p.n ?? 10, f, "under", p.line) : answerUnders(d, p.n ?? 8, f, p.market ? [p.market] : undefined); break;

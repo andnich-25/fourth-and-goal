@@ -4,7 +4,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaTool } from "@anthropic-ai/sdk/helpers/beta/json-schema.mjs";
 import {
-  answerDue, answerGame, answerInjuries, answerJson, answerParlay, answerPerGame, answerPlayer, answerProps, answerRecord, answerSleepers, answerTop,
+  answerAny, answerDue, answerGame, answerInjuries, answerJson, answerParlay, answerPerGame, answerPlayer, answerProps, answerRecord, answerSleepers, answerTop,
   answerUnders, answerValue, gameLabel, parse, type AskData, type Filters,
 } from "@/lib/ask";
 import { MODEL } from "@/lib/aiKey";
@@ -40,8 +40,13 @@ function tools(d: AskData) {
       run: async (i) => out(answerJson(answerTop(d, i.limit, filters(i)))),
     }),
     betaTool({
-      name: "best_per_game", description: "The single most likely leg in each game (anytime TD by default, or a prop market), plus how likely several of them hit together.",
-      inputSchema: { type: "object", properties: { market: { type: "string", enum: ["td", ...markets] }, position: POSITION, day: DAY }, additionalProperties: false } as const,
+      name: "safest_any_market", description: "The most likely bets across EVERY market (anytime TD and all player props, likelier side), one per player, highest chance first. Use for 'safest pick', 'any prop', 'best bets' questions that do not name a market. Props use book lines when loaded, else the player's usual line (flagged).",
+      inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 25 }, position: POSITION, teams: TEAMS, day: DAY, include_questionable: { type: "boolean" } }, required: ["limit"], additionalProperties: false } as const,
+      run: async (i) => out(answerJson(answerAny(d, i.limit, filters(i)))),
+    }),
+    betaTool({
+      name: "best_per_game", description: "The single most likely leg in each game (anytime TD by default, a prop market, or 'any' for the best leg across all markets), plus how likely several of them hit together.",
+      inputSchema: { type: "object", properties: { market: { type: "string", enum: ["td", "any", ...markets] }, position: POSITION, day: DAY }, additionalProperties: false } as const,
       run: async (i) => out(answerJson(answerPerGame(d, i.market ?? "td", filters(i)))),
     }),
     betaTool({
@@ -105,6 +110,7 @@ const SYSTEM = `You are the question box on Fourth & Goal, an NFL touchdown and 
 Rules:
 - Every chance, price, line, edge, projection and hit rate you mention must come from a tool result in this conversation. Never estimate, round up or add numbers of your own. If the tools do not cover something (weather, news, a market the site does not model), say so plainly.
 - Chances are validated model probabilities; "tier" and "tier_past_hit_rate" say how often past picks in that range hit. Prefer higher chances and, when prices are loaded, real edges. Mention injury notes.
+- Match the market to the question. Only use TD tools when the visitor asks about touchdowns or scorers. If they say "any prop", "any market", "safest pick" or name no market, use safest_any_market (or best_per_game with market "any" for one per game).
 - Call several tools when the question needs it (for example list_games, then best_per_game). Pass filters (position, teams, day) when the question names them.
 - Keep the answer short and scannable: a one-line lead, then a list of picks (player, team, bet, our chance, best price if any), then at most two short caveats. No guarantees; book prices are sharp and no bet is a sure thing.`;
 

@@ -34,6 +34,8 @@ describe("ask parser", () => {
     ["Who will fall short this week?", "unders"],
     ["best unders for receivers", "unders"],
     ["who is due for a TD", "due"],
+    ["What is the safest pick from all 14 games. It can be any prop", "any"],
+    ["best bets this week any market", "any"],
     ["any unlucky receivers due to bounce back", "due"],
   ])("%s -> %s", (q, intent) => expect(parse(d, q).intent).toBe(intent));
 
@@ -54,6 +56,20 @@ describe("ask parser", () => {
   it("limits a one-team question to that team and a matchup to that game", () => {
     expect(answer(d, "who scores for the bears").picks?.map((p) => p.team)).toEqual(["CHI"]);
     expect(answer(d, "patriots bears").groups?.[0].picks.map((p) => p.name)).toEqual(["D'Andre Swift", "Rhamondre Stevenson"]);
+  });
+
+  it("searches every market for an any-prop question and reads the slate size as context", () => {
+    const p = parse(d, "What is the safest pick from all 14 games. It can be any prop");
+    expect([p.intent, p.n]).toEqual(["any", 1]);
+    const withProps: AskData = { ...d, props: { receptions: { label: "Receptions", rows: [{ player_id: "2", player_name: "Amon-Ra St. Brown", team: "DET", opponent: "TB",
+      position: "WR", game_id: "2026_07_TB_DET", eligible: 1, median: 8, q10: 5, q90: 11, evidence: { receptions_med: 8 },
+      dist: { type: "quantiles", q: Array.from({ length: 99 }, (_, i) => 3 + i * 0.1), platt: [1, 0] } }] } } };
+    const a = answer(withProps, "safest pick, any prop");
+    expect(a.picks?.length).toBe(1);
+    expect(a.picks?.[0].market).not.toBe(undefined);
+    expect(parse(d, "safest pick from each game, any market").intent).toBe("pergame");
+    expect(answer(withProps, "safest pick from each game").title).toContain("any market");
+    expect(answer(d, "one TD scorer from each game").title).toContain("TD scorer");
   });
 
   it("flags due players from expected vs actual TDs", () => {

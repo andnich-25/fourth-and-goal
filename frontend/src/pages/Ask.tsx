@@ -32,13 +32,13 @@ export function useAskData(season: number, week: number): { data: AskData | null
   const loading = ranks.isLoading || markets.isLoading || props.some((p) => p.isLoading) || model.isLoading;
   const propsKey = props.map((p) => p.dataUpdatedAt).join(",");
   const data = React.useMemo<AskData | null>(() => {
-    if (!ranks.data) return null;
+    if (!ranks.data || loading) return null; // answer only once every market has loaded, or props would be silently missing
     const pm: AskData["props"] = {};
     validated.forEach((m, i) => { const rows = props[i]?.data?.rows; if (rows) pm[m.market] = { label: m.label, rows }; });
     return { season, week, td: ranks.data.calibrated ? ranks.data.rows : [], props: pm, feed, conf: conf.data,
       buckets: model.data?.buckets ?? {}, useCorr: !!model.data?.use_correlation, dueRecord: dueRecord(due.data) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ranks.data, propsKey, feed, conf.data, model.data, due.data, season, week]);
+  }, [ranks.data, propsKey, feed, conf.data, model.data, due.data, season, week, loading]);
   return { data, loading };
 }
 
