@@ -1,6 +1,7 @@
 # Rebuilds the free hosted website from fresh nflverse data and publishes it to GitHub Pages.
 # Runs Tuesday morning (after Monday night), Thursday morning (injury reports, before TNF),
-# Saturday morning and Sunday morning (final injury designations), on every push to main,
+# Saturday morning, Sunday morning (final injury designations), Sunday evening (before the night game) and Monday
+# afternoon (Sunday's games graded, before Monday night), on every push to main,
 # and on demand from the Actions tab. Sportsbook prices are fetched on Saturday and manual runs.
 # After the daily NBA and college football runs ("Collect NBA data", "Collect college football data") it republishes
 # with their fresh numbers and reuses the NFL pages from the last full run, so the NFL pipeline is not repeated daily.
@@ -12,6 +13,8 @@ on:
     - cron: "0 15 * * 4"   # Thu 15:00 UTC
     - cron: "0 15 * * 6"   # Sat 15:00 UTC
     - cron: "0 14 * * 0"   # Sun 14:00 UTC
+    - cron: "30 21 * * 0"  # Sun 21:30 UTC, before Sunday night
+    - cron: "0 20 * * 1"   # Mon 20:00 UTC, Sunday graded, before Monday night
   workflow_dispatch:
   push:
     branches: [main]

@@ -111,6 +111,7 @@ def run_props(c, season=2026, log=print) -> dict:
         try:
             from . import gamesim  # noqa: PLC0415
             sim = gamesim.run(c, frame, log)
+            gamesim.review(c, frame, log=log)  # post-game: rerun finished weeks with the real volume and roles
             out["gamesim"] = {m: r["adopt"] for m, r in sim["markets"].items()}
             gamesim.attach(c, frame, season, wk, out["projection"]["run_id"], log)
         except Exception as ex:  # noqa: BLE001 - the site still builds on the model alone

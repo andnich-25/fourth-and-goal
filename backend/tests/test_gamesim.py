@@ -38,3 +38,15 @@ def test_blend_matches_inputs_at_identity_weights():
     sim = {"q": q, "w": [0.0, 1.0, 0.0]}
     p = gamesim.blend_p(0.9, sim, 59.5)
     assert 0.45 < p < 0.55  # about half the simulated games land above the middle
+
+
+def test_volume_factor_uses_only_earlier_weeks():
+    rows = []
+    for wk, att in ((1, 40), (2, 40), (3, 99)):
+        rows.append({"season": 2026, "week": wk, "labelled": 1, "game_id": f"g{wk}", "team": "DET", "team_attempts": att,
+                     "team_attempts_pg": 32.0, "team_carries": 26, "team_carries_pg": 26.0})
+    f = pd.DataFrame(rows)
+    adj = gamesim.volume_factor(f, 2026, 3)  # week 3's own result must not count
+    assert 1.0 < adj["pass_adj"] < 40 / 32
+    assert adj["rush_adj"] == 1.0
+    assert gamesim.volume_factor(f, 2026, 1) == {"pass_adj": 1.0, "rush_adj": 1.0}

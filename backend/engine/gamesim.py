@@ -29,8 +29,12 @@ LEAGUE = {"catch_rate": 0.65, "ypr": 10.8, "ypc": 4.3, "int_rate": 0.023, "td_ra
 # Tuned on 2021 only (see tune()); evaluation uses 2022 onward.
 # On 2021, letting the spread push pass/run volume made the simulation less accurate (team volume already reflects how
 # each team plays), so the game-script slopes are 0; the shared volume wobble and share wobble carry the correlation.
+# other_min_*: the smallest share left for players outside the frame. The post-game review found a fixed 6% floor took
+# about 7% of targets away from the listed receivers, whose shares already sum to about 1 (2% tested better on every
+# past week for receiving; carries kept 4%, which tested better than 2%).
+# pass_adj / rush_adj: league-wide volume correction learned from recent finished weeks (volume_factor), 1.0 = none.
 PARAMS = {"alpha_tgt": 12.0, "alpha_car": 10.0, "k_rec": 0.6, "k_rush": 0.5, "vol_sd": 0.2, "pass_slope": 0.0, "rush_slope": 0.0,
-          "script_sd": 0.0}
+          "script_sd": 0.0, "other_min_tgt": 0.02, "other_min_car": 0.04, "pass_adj": 1.0, "rush_adj": 1.0}
 
 SIM_MARKETS = ["pass_yards", "pass_attempts", "completions", "pass_tds", "interceptions", "rush_yards", "carries",
                "rec_yards", "receptions", "rush_rec_yards"]
@@ -68,15 +72,15 @@ def simulate_team(rows: pd.DataFrame, rng, n: int = N_SIMS, params: dict | None 
     team_att = float(r0.get("team_attempts_pg") or 33.0) * pos_mult("opp_attempts_mult", "QB")
     team_car = float(r0.get("team_carries_pg") or 26.0) * pos_mult("opp_carries_mult", "RB")
     team_tgt_ratio = float(r0.get("team_targets_pg") or 31.0) / max(float(r0.get("team_attempts_pg") or 33.0), 1.0)
-    att = rng.poisson(np.maximum(team_att * vol * np.exp(P["pass_slope"] * margin / 14.0), 1.0))
-    car = rng.poisson(np.maximum(team_car * vol * np.exp(P["rush_slope"] * margin / 14.0), 1.0))
+    att = rng.poisson(np.maximum(team_att * P["pass_adj"] * vol * np.exp(P["pass_slope"] * margin / 14.0), 1.0))
+    car = rng.poisson(np.maximum(team_car * P["rush_adj"] * vol * np.exp(P["rush_slope"] * margin / 14.0), 1.0))
     implied = float(r0.get("team_implied_total") or 22.0)
     out: dict[str, dict[str, np.ndarray]] = {}
 
     # Receivers: targets shared out, then catches and yards from each player's efficiency vs this defense.
     rec_idx = np.where(np.isin(pos, ["RB", "WR", "TE"]))[0]
     tgt_share = _num(rows.targets_share.iloc[rec_idx]) * _num(rows.opp_targets_mult.iloc[rec_idx], 1.0)
-    other = max(0.06, 1.0 - tgt_share.sum())
+    other = max(P["other_min_tgt"], 1.0 - tgt_share.sum())
     shares = np.append(tgt_share, other)
     shares /= shares.sum()
     tgts = _dirichlet_multinomial(rng, np.round(att * team_tgt_ratio), shares, P["alpha_tgt"])
@@ -103,7 +107,7 @@ def simulate_team(rows: pd.DataFrame, rng, n: int = N_SIMS, params: dict | None 
     # Rushers: carries shared out among the backs and quarterback.
     rush_idx = np.where(np.isin(pos, ["QB", "RB"]))[0]
     car_share = _num(rows.carries_share.iloc[rush_idx]) * _num(rows.opp_carries_mult.iloc[rush_idx], 1.0)
-    other = max(0.04, 1.0 - car_share.sum())
+    other = max(P["other_min_car"], 1.0 - car_share.sum())
     shares = np.append(car_share, other)
     shares /= shares.sum()
     cars = _dirichlet_multinomial(rng, car, shares, P["alpha_car"])
@@ -148,6 +152,21 @@ def simulate_week(week_rows: pd.DataFrame, n: int = N_SIMS, seed: int = 7, param
     return res
 
 
+def volume_factor(frame: pd.DataFrame, season: int, week: int, k: int = 4) -> dict:
+    """How far real team pass attempts and carries ran from the pregame per-game inputs over the last k finished weeks of
+    this season (only weeks before `week`, so it never peeks), shrunk toward 1 when few weeks are in. Feeds the next
+    pregame simulation: what the post-game review learns, the following week uses."""
+    lab = frame[(frame.labelled == 1) & (frame.season == season) & (frame.week < week)]
+    wk = sorted(lab.week.unique())[-k:]
+    g = lab[lab.week.isin(wk)].groupby(["game_id", "team"]).first()
+    if g.empty:
+        return {"pass_adj": 1.0, "rush_adj": 1.0}
+    f = lambda a, b: float(pd.to_numeric(g[a], errors="coerce").sum() / max(pd.to_numeric(g[b], errors="coerce").sum(), 1.0))  # noqa: E731
+    w = len(wk) / (len(wk) + 2.0)
+    return {"pass_adj": round(1 + (f("team_attempts", "team_attempts_pg") - 1) * w, 4),
+            "rush_adj": round(1 + (f("team_carries", "team_carries_pg") - 1) * w, 4)}
+
+
 def _logit(p):
     p = np.clip(np.asarray(p, float), 0.005, 0.995)  # same clip as the site's pOver
     return np.log(p / (1 - p))
@@ -179,7 +198,7 @@ def sim_over(frame: pd.DataFrame, bt: pd.DataFrame, weeks, n=N_SIMS, params=None
     out = []
     for s, w in weeks:
         rows = lab[(lab.season == s) & (lab.week == w)]
-        sims = simulate_week(rows, n, seed=s * 100 + w, params=params)
+        sims = simulate_week(rows, n, seed=s * 100 + w, params={**(params or {}), **volume_factor(frame, s, w)})
         b = bt[(bt.season == s) & (bt.week == w)].copy()
         p = np.full(len(b), np.nan)
         for k, r in enumerate(b.itertuples(index=False)):
@@ -274,6 +293,95 @@ def run(c, frame: pd.DataFrame | None = None, log=print, n: int = 2000) -> dict:
     return rep
 
 
+REVIEW_STATS = {"receptions": "receptions", "rec_yards": "rec_yards", "rush_yards": "rush_yards", "carries": "carries",
+                "pass_yards": "pass_yards", "completions": "completions", "pass_attempts": "attempts"}
+
+
+def _postgame_rows(rows: pd.DataFrame, level: str) -> pd.DataFrame:
+    """The same players with what actually happened swapped in: 'volume' = each team's real pass attempts, carries and
+    targets; 'role' = that plus each player's real share of them. Whatever error is left after 'role' is efficiency
+    (yards per catch or carry, catch rate) and plain chance."""
+    r = rows.copy()
+    num = lambda col: pd.to_numeric(r[col], errors="coerce")  # noqa: E731
+    for pg, act in (("team_attempts_pg", "team_attempts"), ("team_carries_pg", "team_carries"), ("team_targets_pg", "team_targets")):
+        r[pg] = num(act).fillna(num(pg))
+    r["opp_attempts_mult"] = 1.0
+    if level == "role":
+        r["targets_share"] = (num("targets") / num("team_targets").replace(0, np.nan)).fillna(0.0)
+        r["carries_share"] = (num("carries") / num("team_carries").replace(0, np.nan)).fillna(0.0)
+        r["attempts_pg"] = num("attempts").fillna(num("attempts_pg"))
+        r["opp_targets_mult"] = 1.0
+        r["opp_carries_mult"] = 1.0
+    return r
+
+
+def review(c, frame: pd.DataFrame | None = None, season: int | None = None, weeks: int = 4, n: int = 2000, log=print) -> dict:
+    """Post-game check of the simulation: rerun each finished week with the real team volume, then also the real player
+    roles, and compare each against the pregame run. Shows where the pregame inputs were off, market by market."""
+    frame = props.build_frame(c) if frame is None else frame
+    lab = frame[(frame.labelled == 1) & frame.has_history.eq(1)]
+    season = season or int(lab.season.max())
+    done = sorted(lab[lab.season == season].week.unique())[-weeks:]
+    params = {**PARAMS, "vol_sd": 0.0}
+    per: dict[str, dict[str, list[float]]] = {}
+    vol = {"pass": [], "rush": []}
+    for w in done:
+        rows = lab[(lab.season == season) & (lab.week == w)]
+        runs = {"pregame": simulate_week(rows, n, seed=season * 100 + w, params=volume_factor(frame, season, w))}
+        for level in ("volume", "role"):
+            runs[level] = simulate_week(_postgame_rows(rows, level), n, seed=season * 100 + w, params=params)
+        for t, g in rows.groupby("team"):
+            g0 = g.iloc[0]
+            vol["pass"].append(float(pd.to_numeric(g0.team_attempts, errors="coerce")) - float(g0.team_attempts_pg or 0))
+            vol["rush"].append(float(pd.to_numeric(g0.team_carries, errors="coerce")) - float(g0.team_carries_pg or 0))
+        for r in rows.itertuples(index=False):
+            for m, st in REVIEW_STATS.items():
+                actual = pd.to_numeric(getattr(r, st, np.nan), errors="coerce")
+                d0 = runs["pregame"].get((r.player_id, r.team), {})
+                if pd.isna(actual) or st not in d0 or (m in ("pass_yards", "completions", "pass_attempts") and r.position != "QB"):
+                    continue
+                if m not in ("pass_yards", "completions", "pass_attempts") and float(np.median(d0[st])) < 1:
+                    continue  # players with no real role add noise, not insight
+                e = per.setdefault(m, {"pregame": [], "volume": [], "role": [], "bias": []})
+                for level in ("pregame", "volume", "role"):
+                    dl = runs[level].get((r.player_id, r.team), {})
+                    if st in dl:
+                        e[level].append(abs(float(np.median(dl[st])) - float(actual)))
+                e["bias"].append(float(actual) - float(np.median(d0[st])))
+    markets = {}
+    for m, e in per.items():
+        k = min(len(e["pregame"]), len(e["volume"]), len(e["role"]))
+        if k < 30:
+            continue
+        a, b, c_ = (float(np.mean(e[x][:k])) for x in ("pregame", "volume", "role"))
+        total = max(a, 1e-9)
+        markets[m] = {"label": props.MARKETS[m]["label"], "n": k, "miss_pregame": round(a, 2), "miss_real_volume": round(b, 2),
+                      "miss_real_role": round(c_, 2), "bias": round(float(np.mean(e["bias"])), 2),
+                      "share_volume": round(max(a - b, 0) / total, 3), "share_role": round(max(b - c_, 0) / total, 3),
+                      "share_efficiency": round(c_ / total, 3)}
+    vol_bias = {k: round(float(np.nanmean(v)), 1) for k, v in vol.items() if v}
+    biggest = max(markets.items(), key=lambda kv: kv[1]["share_volume"] + kv[1]["share_role"], default=None)
+    notes = []
+    if vol_bias:
+        notes.append(f"Teams threw {abs(vol_bias['pass']):.1f} {'more' if vol_bias['pass'] > 0 else 'fewer'} passes and ran {abs(vol_bias['rush']):.1f} "
+                     f"{'more' if vol_bias['rush'] > 0 else 'fewer'} times per game than the pregame inputs said.")
+    if biggest:
+        m, x = biggest
+        notes.append(f"{x['label']}: knowing the real volume and roles would have cut the typical miss from {x['miss_pregame']} to {x['miss_real_role']}; "
+                     f"the rest ({x['share_efficiency']:.0%}) is efficiency and chance.")
+    rep = {"created_at": utcnow(), "season": season, "weeks": [int(w) for w in done], "sims_per_game": n, "volume_bias": vol_bias,
+           "markets": markets, "notes": notes}
+    log(f"gamesim review: weeks {rep['weeks']} " + "; ".join(notes))
+    paths.results_dir().mkdir(parents=True, exist_ok=True)
+    (paths.results_dir() / "gamesim_review.json").write_text(json.dumps(rep, indent=2, default=float))
+    return rep
+
+
+def latest_review() -> dict | None:
+    f = paths.results_dir() / "gamesim_review.json"
+    return json.loads(f.read_text()) if f.exists() else None
+
+
 def latest() -> dict | None:
     f = paths.results_dir() / "gamesim.json"
     return json.loads(f.read_text()) if f.exists() else None
@@ -284,7 +392,9 @@ def attach(c, frame: pd.DataFrame, season: int, week: int, run_id: str, log=prin
     rep = latest()
     adopted = {m: r["weights"] for m, r in (rep or {}).get("markets", {}).items() if r.get("adopt") and r.get("weights")}
     rows = frame[(frame.season == season) & (frame.week == week)]
-    sims = simulate_week(rows, n, seed=season * 100 + week)
+    adj = volume_factor(frame, season, week)
+    sims = simulate_week(rows, n, seed=season * 100 + week, params=adj)
+    log(f"gamesim: league volume correction from recent weeks: passes x{adj['pass_adj']}, carries x{adj['rush_adj']}")
     qs = np.arange(1, 100)
     updates, count = [], {}
     for r in c.execute("SELECT market, player_id, team, dist FROM prop_projections WHERE run_id=? AND calibrated=1", (run_id,)).fetchall():

@@ -136,7 +136,9 @@ def collect(c, season: int, week: int) -> list[dict]:
         out.append({"kind": "props", "market": r["market"], "game_id": r["game_id"], "player_id": r["player_id"],
                     "player_name": r["player_name"], "team": r["team"], "position": r["position"], "side": side, "line": float(line),
                     "line_source": source, "p": round(p, 4), "tier": tier("props", p),
-                    "featured": p >= PROP_TIERS[0][1]})
+                    "featured": p >= PROP_TIERS[0][1],
+                    # The projection itself, so the report can check how close it came, not only which side won.
+                    "median": round(float(r["median"]), 2), "q10": round(float(r["q10"]), 2), "q90": round(float(r["q90"]), 2)})
     return out
 
 
@@ -199,6 +201,36 @@ def _summary(rows: list[dict]) -> dict:
     return {"n": n, "hits": k, "rate": k / n if n else None, "avg_chance": avg, "ci": ci, "drift": drift}
 
 
+def _projection_check(graded: list[dict]) -> list[dict]:
+    """How close each market's projections came to what happened: typical miss, bias, and how often the 8-in-10 range held."""
+    out = []
+    for m in sorted({r["market"] for r in graded if r["kind"] == "props" and r.get("median") is not None}):
+        sel = [r for r in graded if r["market"] == m and r.get("median") is not None and r["actual"] is not None]
+        if not sel:
+            continue
+        err = [r["actual"] - r["median"] for r in sel]
+        out.append({"market": m, "label": props.MARKETS[m]["label"], "n": len(sel),
+                    "typical_miss": round(sorted(abs(e) for e in err)[len(err) // 2], 2),
+                    "bias": round(sum(err) / len(err), 2),
+                    "in_range": round(sum(r["q10"] <= r["actual"] <= r["q90"] for r in sel) / len(sel), 3)})
+    return out
+
+
+def _score_check(c, weeks: list[tuple[int, int]]) -> dict | None:
+    """The betting lines the models lean on (team totals, spreads) against the final scores of the same weeks."""
+    rows = []
+    for season, week in weeks:
+        rows += [dict(r) for r in c.execute("SELECT home_score, away_score, spread_line, total_line FROM games WHERE season=? AND week=? "
+                                            "AND home_score IS NOT NULL AND total_line IS NOT NULL", (season, week))]
+    if not rows:
+        return None
+    tot = [r["home_score"] + r["away_score"] - r["total_line"] for r in rows]
+    mar = [(r["home_score"] - r["away_score"]) - (r["spread_line"] or 0) for r in rows]
+    return {"games": len(rows), "total_typical_miss": round(sorted(abs(x) for x in tot)[len(tot) // 2], 1),
+            "total_bias": round(sum(tot) / len(tot), 1), "overs": sum(x > 0 for x in tot),
+            "margin_typical_miss": round(sorted(abs(x) for x in mar)[len(mar) // 2], 1)}
+
+
 def report(c) -> dict:
     files = sorted(picks_dir().glob("*.json")) if picks_dir().exists() else []
     weeks, graded = [], []
@@ -210,8 +242,10 @@ def report(c) -> dict:
         weeks.append({"season": w["season"], "week": w["week"], "picks": len(rows), "graded": len(g),
                       "void": sum(r["status"] == "void" for r in rows), "pending": sum(r["status"] == "pending" for r in rows),
                       "featured": _summary([r for r in g if r["featured"]]), "all": _summary(g)})
+    from . import gamesim  # noqa: PLC0415
+    sim_review = gamesim.latest_review()
     if not graded:
-        return {"available": False, "created_at": utcnow(), "weeks": weeks,
+        return {"available": False, "created_at": utcnow(), "weeks": weeks, "sim_review": sim_review,
                 "empty_reason": "Picks are saved before every kickoff starting with 2026 Week 7. The first results appear after those games are final."}
     by = lambda key: sorted({key(r) for r in graded})  # noqa: E731
     tiers = {kind: [{"tier": t, **_summary([r for r in graded if r["kind"] == kind and r["tier"] == t])}
@@ -231,13 +265,15 @@ def report(c) -> dict:
                           **_summary([r for r in graded if r["market"] == m])} for m in by(lambda r: r["market"])],
            "by_side": [{"side": s, **_summary([r for r in graded if r["side"] == s])} for s in by(lambda r: r["side"])],
            "calibration": bins, "weeks": weeks, "drift": drift, "drift_min_n": DRIFT_MIN_N,
+           "sim_review": sim_review, "projections": _projection_check(graded), "scores": _score_check(c, sorted({(r["season"], r["week"]) for r in graded})),
            "last_week": {"season": last[0], "week": last[1], "featured_misses": [
                {k: r[k] for k in ("player_name", "team", "market", "side", "line", "p", "actual", "tier")} for r in misses]},
            "method": ["Picks are saved by every site update and frozen at each game's kickoff, so results are never graded with hindsight.",
                       "A pick is the leaning side at the line shown: the main sportsbook line once prices are loaded, otherwise the player's usual line.",
                       "Players who did not play are void and left out.",
                       f"A tier is flagged as drifting once it has {DRIFT_MIN_N}+ graded picks and its 95% interval no longer contains the chance the site gave.",
-                      "The models refit on every new box score each run; drift flags are reviewed weekly before any adjustment is made."]}
+                      "Each projection is also checked against the final stat (typical miss, whether it ran high or low, how often the 8-in-10 range held), and the betting lines behind team scoring against the final scores.",
+                      "The site refreshes before every game window (Thursday, Saturday, Sunday morning, Sunday evening, Monday) with the latest box scores, injury reports and prices, and the models refit on every new box score each run; drift flags are reviewed weekly before any adjustment is made."]}
     return out
 
 
