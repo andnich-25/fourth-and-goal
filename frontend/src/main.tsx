@@ -26,6 +26,12 @@ import NbaAsk from "./pages/nba/NbaAsk";
 import NbaPlayer from "./pages/nba/NbaPlayer";
 import NbaRecord from "./pages/nba/NbaRecord";
 import NbaHow from "./pages/nba/NbaHow";
+import CfbHome from "./pages/cfb/CfbHome";
+import CfbGame from "./pages/cfb/CfbGame";
+import CfbAsk from "./pages/cfb/CfbAsk";
+import CfbTeams from "./pages/cfb/CfbTeams";
+import CfbProps from "./pages/cfb/CfbProps";
+import CfbResearch from "./pages/cfb/CfbResearch";
 import HitRates from "./pages/HitRates";
 import { EmptyState } from "./components/ui";
 import { STATIC } from "./lib/api";
@@ -66,6 +72,12 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Route path="nba/players/:id" element={<NbaPlayer />} />
               <Route path="nba/record" element={<NbaRecord />} />
               <Route path="nba/how" element={<NbaHow />} />
+              <Route path="cfb" element={<CfbHome />} />
+              <Route path="cfb/game/:id" element={<CfbGame />} />
+              <Route path="cfb/ask" element={<CfbAsk />} />
+              <Route path="cfb/teams" element={<CfbTeams />} />
+              <Route path="cfb/props" element={<CfbProps />} />
+              <Route path="cfb/research" element={<CfbResearch />} />
               <Route path="*" element={<EmptyState title="Page not found">That route does not exist.</EmptyState>} />
             </Route>
           </Routes>

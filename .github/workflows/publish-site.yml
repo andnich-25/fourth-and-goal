@@ -2,8 +2,8 @@
 # Runs Tuesday morning (after Monday night), Thursday morning (injury reports, before TNF),
 # Saturday morning and Sunday morning (final injury designations), on every push to main,
 # and on demand from the Actions tab. Sportsbook prices are fetched on Saturday and manual runs.
-# After the daily NBA run ("Collect NBA data") it republishes with fresh NBA numbers and reuses the NFL pages
-# from the last full run, so the NFL pipeline is not repeated every day.
+# After the daily NBA and college football runs ("Collect NBA data", "Collect college football data") it republishes
+# with their fresh numbers and reuses the NFL pages from the last full run, so the NFL pipeline is not repeated daily.
 name: Refresh data and publish site
 
 on:
@@ -16,7 +16,7 @@ on:
   push:
     branches: [main]
   workflow_run:
-    workflows: ["Collect NBA data"]
+    workflows: ["Collect NBA data", "Collect college football data"]
     types: [completed]
 
 permissions:
@@ -145,6 +145,14 @@ jobs:
           path: site-data/nba
           key: nba-site-${{ github.run_id }}
           restore-keys: nba-site-
+
+      # College football numbers are computed by the "Collect college football data" workflow and kept in the cache.
+      - name: Restore college football pages
+        uses: actions/cache/restore@v4
+        with:
+          path: site-data/cfb
+          key: cfb-site-${{ github.run_id }}
+          restore-keys: cfb-site-
 
       - name: Build website
         working-directory: frontend

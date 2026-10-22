@@ -1,0 +1,129 @@
+import json
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from cfb import collect, model, pipeline, ratings, report
+
+
+def test_budget_keeps_the_reserve_and_buys_lines_on_tuesday_and_saturday():
+    tue = collect.plan_budget(480, 20, n_games=60, n_featured=3, weekday=1)
+    assert tue["game_lines"] and tue["team_totals"] == 0 and tue["props"] == 0 and tue["cost"] == 3
+    sat = collect.plan_budget(480, 20, n_games=60, n_featured=3, weekday=5)
+    assert sat["game_lines"] and sat["team_totals"] == 3 and sat["props"] == 1 and sat["cost"] == 3 + 3 + 4
+    assert not collect.plan_budget(480, 20, 60, 3, weekday=0)["game_lines"]          # Monday: nothing
+    assert collect.plan_budget(480, 20, 60, 3, weekday=3)["game_lines"]              # Thursday, Tuesday missed
+    assert not collect.plan_budget(480, 20, 60, 3, weekday=3, have_lines_this_week=True)["game_lines"]
+    low = collect.plan_budget(202, 298, 60, 3, weekday=5)
+    assert not low["game_lines"] and low["cost"] == 0
+    paid = collect.plan_budget(19000, 1000, 60, 4, weekday=5)
+    assert paid["plan"] == "paid" and paid["props"] == 4
+    assert not collect.plan_budget(None, None, 60, 3, 5)["game_lines"]
+
+
+def test_team_names_match_the_longest_school():
+    teams = {"Miami": 1, "Miami (OH)": 2, "Texas": 3, "Texas A&M": 4}
+    assert collect.match_team("Miami (OH) RedHawks", teams) == 2
+    assert collect.match_team("Miami Hurricanes", teams) == 1
+    assert collect.match_team("Texas A&M Aggies", teams) == 4
+    assert collect.match_team("Texas Longhorns", teams) == 3
+    assert collect.match_team("Oregon Ducks", teams) is None
+
+
+def test_scoreboard_reads_lines_and_ranks():
+    ev = {"id": "401", "date": "2026-10-24T19:30Z", "status": {"type": {"name": "STATUS_SCHEDULED"}},
+          "competitions": [{"neutralSite": False, "broadcasts": [{"names": ["ABC"]}], "competitors": [
+              {"homeAway": "home", "team": {"id": "333", "abbreviation": "ALA"}, "curatedRank": {"current": 4}},
+              {"homeAway": "away", "team": {"id": "2", "abbreviation": "AUB"}, "curatedRank": {"current": 99}}],
+              "odds": [{"provider": {"name": "ESPN BET"}, "details": "AUB -3.5", "overUnder": 51.5,
+                        "homeTeamOdds": {"moneyLine": 140}, "awayTeamOdds": {"moneyLine": -165}}]}]}
+    r = collect.parse_scoreboard({"data": {"events": [ev]}})[0]
+    assert r["game_id"] == 401 and r["home_rank"] == 4 and r["away_rank"] is None and r["tv"] == "ABC"
+    assert r["home_spread"] == 3.5 and r["total"] == 51.5 and r["ml_home"] == 140 and r["ml_away"] == -165
+
+
+def _league(seed=0, n_teams=24, weeks=12):
+    rng = np.random.default_rng(seed)
+    off = rng.normal(0, 7, n_teams)
+    de = rng.normal(0, 7, n_teams)
+    rows = []
+    day = pd.Timestamp("2025-09-01")
+    gid = 1
+    for w in range(weeks):
+        order = rng.permutation(n_teams)
+        for i in range(0, n_teams, 2):
+            h, a = order[i], order[i + 1]
+            hp = 28 + off[h] - de[a] + 1.5 + rng.normal(0, 7)
+            ap = 28 + off[a] - de[h] - 1.5 + rng.normal(0, 7)
+            rows.append({"game_id": gid, "date": day + pd.Timedelta(days=7 * w), "season": 2025, "week": w + 1,
+                         "season_type": "regular", "home_id": h, "away_id": a, "neutral": False, "final": True,
+                         "home_points": round(max(hp, 0)), "away_points": round(max(ap, 0))})
+            gid += 1
+    return pd.DataFrame(rows), off, de
+
+
+def test_ratings_recover_team_strength():
+    g, off, de = _league(weeks=20)
+    r = ratings.fit(g, g.date.max() + pd.Timedelta(days=1), half_life=1e6, alpha=1.0)
+    est_off = np.array([r["off"][t] for t in range(len(off))])
+    est_def = np.array([r["def"][t] for t in range(len(de))])
+    assert np.corrcoef(est_off, off)[0, 1] > 0.8 and np.corrcoef(est_def, de)[0, 1] > 0.8
+    assert 0 < r["home"] < 4
+
+
+def test_ratings_use_only_earlier_games():
+    g, *_ = _league()
+    cut = g.date.iloc[len(g) // 2]
+    a = ratings.fit(g, cut)
+    changed = g.copy()
+    changed.loc[changed.date >= cut, "home_points"] += 50
+    b = ratings.fit(changed, cut)
+    assert a["off"] == b["off"] and a["base"] == b["base"]
+
+
+def test_simulation_counts_pushes_and_chances_add_up():
+    pool = np.array([[0.0, 0.0], [3.0, 0.0], [-3.0, 0.0], [7.0, -7.0], [-7.0, 7.0]])
+    h, a = model.simulate(np.array([24.0]), np.array([21.0]), pool, n=5000, seed=1)
+    assert h.shape == (1, 5000) and (h >= 0).all() and (h == np.rint(h)).all()
+    c = model.chances(h, a, np.array([-3.0]), np.array([45.0]), np.array([23.5]), np.array([20.5]))
+    margin = h - a
+    assert c["push_spread"][0] == pytest.approx((margin == 3).mean())
+    assert 0 < c["p_home_cover"][0] < 1 and 0 < c["p_over"][0] < 1
+    assert c["p_home_win"][0] == pytest.approx((margin > 0).mean() + 0.5 * (margin == 0).mean())
+
+
+def test_implied_team_total_sits_on_a_half_point():
+    tt = model.implied_team_total(pd.Series([-7.0, 3.0]), pd.Series([55.0, 48.5]), "home")
+    assert list(tt) == [31.5, 22.5]
+
+
+def test_a_tier_counts_only_if_stronger_tiers_count():
+    rows = []
+    rng = np.random.default_rng(2)
+    for p, rate in ((0.51, 0.50), (0.53, 0.56), (0.56, 0.50)):   # middle tier hot, top tier not
+        for s in (2023, 2024, 2025):
+            rows += [{"p": p, "won": int(rng.random() < rate), "season": s} for _ in range(400)]
+    t = report.tier_rows(pd.DataFrame(rows), recent=[2024, 2025])
+    assert [x["proven"] for x in t] == [False, False, False]
+    rows = [r for r in rows if r["p"] != 0.56] + [{"p": 0.56, "won": int(rng.random() < 0.6), "season": s}
+                                                     for s in (2023, 2024, 2025) for _ in range(400)]
+    t = report.tier_rows(pd.DataFrame(rows), recent=[2024, 2025])
+    assert t[2]["proven"] and t[1]["proven"] and not t[0]["proven"]
+
+
+def test_frozen_picks_are_graded_at_their_line(tmp_path, monkeypatch):
+    monkeypatch.setenv("CFB_ARCHIVE_DIR", str(tmp_path))
+    (tmp_path / "picks").mkdir()
+    pick = {"game_id": 9, "date": "2026-10-24T19:30:00Z", "home": "Alabama", "away": "Auburn", "line": {},
+            "markets": [{"market": "spread", "side": "home", "team": "Alabama", "line": -3.5, "p": 0.55, "tier": "Strong", "proven": False},
+                        {"market": "total", "side": "under", "line": 51.5, "p": 0.56, "tier": "Strong", "proven": True},
+                        {"market": "team_total", "team": "Auburn", "team_side": "away", "side": "over", "line": 23.5, "p": 0.53,
+                         "tier": "Lean", "proven": False, "line_posted": False},
+                        {"market": "moneyline", "side": "away", "team": "Auburn", "p": 0.4, "price": 150, "tier": "Value", "proven": False}]}
+    (tmp_path / "picks" / "9.json").write_text(json.dumps(pick))
+    g = pd.DataFrame([{"game_id": 9, "final": True, "home_points": 24, "away_points": 21}])
+    rec = pipeline.record(g, {})
+    won = {r["market"]: r["won"] for r in rec["recent"]} | {r["market"]: r["rate"] for r in rec["by_market_tier"]}
+    assert rec["picks"] == 4 and rec["suggested"] == {"n": 1, "hits": 1, "rate": 1.0}
+    assert won["spread"] == 0.0 and won["total"] == 1 and won["team_total"] == 0.0 and won["moneyline"] == 0.0
