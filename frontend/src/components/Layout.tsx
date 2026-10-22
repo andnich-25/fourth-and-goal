@@ -34,6 +34,32 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
 ];
 const NAV = SECTIONS.flatMap((s) => s.items);
 const MOBILE = [NAV[0], NAV[1], NAV[2], NAV[3]];
+const NBA_SECTIONS: { title: string; items: NavItem[] }[] = [
+  { title: "Picks", items: [
+    { to: "/nba", label: "Today", short: "Home", icon: LayoutDashboard, end: true },
+    { to: "/nba/ask", label: "Ask", icon: MessageCircleQuestion },
+    { to: "/nba/builder", label: "Parlay builder", short: "Parlay", icon: Dices },
+  ] },
+  { title: "Research", items: [{ to: "/nba/props", label: "Player props", short: "Props", icon: SlidersHorizontal }] },
+  { title: "Proof", items: [
+    { to: "/nba/how", label: "How it works", icon: BookOpen },
+    { to: "/nba/record", label: "Track record", icon: BarChart3 },
+  ] },
+  { title: "", items: [{ to: "/settings", label: "Settings", icon: Settings }] },
+];
+const NBA_NAV = NBA_SECTIONS.flatMap((s) => s.items);
+const NBA_MOBILE = [NBA_NAV[0], NBA_NAV[3], NBA_NAV[1], NBA_NAV[2]];
+
+/** NFL / NBA switch. Each sport keeps its own pages; the switch goes to that sport's home. */
+function SportSwitch({ nba }: { nba: boolean }) {
+  const base = "rounded-md px-3.5 py-1.5 text-sm font-bold tracking-wide transition-colors";
+  return (
+    <div className="flex rounded-lg border border-line bg-surface p-1" role="tablist" aria-label="Sport">
+      <NavLink to="/" role="tab" aria-selected={!nba} className={cn(base, !nba ? "bg-accent text-accent-fg" : "text-muted hover:bg-raised hover:text-fg")}>NFL</NavLink>
+      <NavLink to="/nba" role="tab" aria-selected={nba} className={cn(base, nba ? "bg-accent text-accent-fg" : "text-muted hover:bg-raised hover:text-fg")}>NBA</NavLink>
+    </div>
+  );
+}
 
 type Health = { data_loaded: boolean; ready: boolean; calibrated: boolean };
 
@@ -110,10 +136,13 @@ export function Layout() {
   const [open, setOpen] = React.useState(false);
   const loc = useLocation();
   React.useEffect(() => setOpen(false), [loc.pathname]);
+  const nba = loc.pathname === "/nba" || loc.pathname.startsWith("/nba/");
+  const sections = nba ? NBA_SECTIONS : SECTIONS;
+  const mobile = nba ? NBA_MOBILE : MOBILE;
   const link = (n: NavItem) => (
     <NavLink
       key={n.to}
-      to={n.to + suffix}
+      to={n.to + (nba ? "" : suffix)}
       end={n.end}
       className={({ isActive }) =>
         cn("flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
@@ -134,10 +163,10 @@ export function Layout() {
       {/* Desktop sidebar */}
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line bg-surface/40 px-3 py-4 lg:flex">
         <div className="px-2 pb-6"><Logo /></div>
-        <nav aria-label="Primary" className="flex flex-1 flex-col gap-0.5"><Sections link={link} /></nav>
+        <nav aria-label="Primary" className="flex flex-1 flex-col gap-0.5"><Sections sections={sections} link={link} /></nav>
         <div className="mt-4 rounded-lg border border-line p-3 text-[11px] leading-relaxed text-muted">
           <Activity className="mb-1 h-3.5 w-3.5 text-accent" aria-hidden />
-          Football research, not betting advice. No pick is guaranteed.
+          {nba ? "Basketball" : "Football"} research, not betting advice. No pick is guaranteed.
         </div>
       </aside>
       {/* Mobile drawer */}
@@ -146,7 +175,7 @@ export function Layout() {
           <div className="absolute inset-0 bg-black/50" onClick={() => setOpen(false)} />
           <nav className="absolute left-0 top-0 flex h-full w-64 flex-col gap-0.5 bg-surface p-3">
             <div className="mb-4 flex items-center justify-between px-2"><Logo /><button aria-label="Close menu" onClick={() => setOpen(false)}><X className="h-5 w-5" /></button></div>
-            <Sections link={link} />
+            <Sections sections={sections} link={link} />
           </nav>
         </div>
       )}
@@ -154,9 +183,10 @@ export function Layout() {
         <header className="sticky top-0 z-30 flex h-14 items-center gap-2 sm:gap-3 border-b border-line bg-bg/85 px-3 backdrop-blur sm:px-6">
           <button className="lg:hidden" aria-label="Open menu" onClick={() => setOpen(true)}><Menu className="h-5 w-5" /></button>
           <div className="lg:hidden"><Logo compact /></div>
+          <SportSwitch nba={nba} />
           <div className="flex-1" />
-          <SeasonWeekPicker />
-          <div className="hidden sm:block"><StatusChip /></div>
+          {!nba && <SeasonWeekPicker />}
+          {!nba && <div className="hidden sm:block"><StatusChip /></div>}
           <ThemeToggle />
         </header>
         <main id="main" className="mx-auto w-full max-w-[1400px] flex-1 px-4 pb-24 pt-5 sm:px-6 lg:pb-10">
@@ -165,8 +195,8 @@ export function Layout() {
       </div>
       {/* Mobile bottom nav */}
       <nav aria-label="Primary mobile" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-surface/95 backdrop-blur lg:hidden">
-        {MOBILE.map((n) => (
-          <NavLink key={n.to} to={n.to + suffix} end={n.end}
+        {mobile.map((n) => (
+          <NavLink key={n.to} to={n.to + (nba ? "" : suffix)} end={n.end}
             className={({ isActive }) => cn("flex flex-col items-center gap-0.5 py-2 text-[10px] font-medium", isActive ? "text-accent" : "text-muted")}>
             <n.icon className="h-5 w-5" aria-hidden />
             {n.short ?? n.label}
@@ -180,10 +210,10 @@ export function Layout() {
   );
 }
 
-function Sections({ link }: { link: (n: NavItem) => React.ReactNode }) {
+function Sections({ sections, link }: { sections: typeof SECTIONS; link: (n: NavItem) => React.ReactNode }) {
   return (
     <>
-      {SECTIONS.map((s, i) => (
+      {sections.map((s, i) => (
         <div key={s.title || i} className={cn(i > 0 && "mt-4", !s.title && "mt-auto border-t border-line pt-3")}>
           {s.title && <div className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted/80">{s.title}</div>}
           <div className="flex flex-col gap-0.5">{s.items.map(link)}</div>

@@ -2,6 +2,8 @@
 # Runs Tuesday morning (after Monday night), Thursday morning (injury reports, before TNF),
 # Saturday morning and Sunday morning (final injury designations), on every push to main,
 # and on demand from the Actions tab. Sportsbook prices are fetched on Saturday and manual runs.
+# After the daily NBA run ("Collect NBA data") it republishes with fresh NBA numbers and reuses the NFL pages
+# from the last full run, so the NFL pipeline is not repeated every day.
 name: Refresh data and publish site
 
 on:
@@ -13,6 +15,9 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  workflow_run:
+    workflows: ["Collect NBA data"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -27,8 +32,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    env:
+      NBA_ONLY: ${{ github.event_name == 'workflow_run' }}
     steps:
       - uses: actions/checkout@v4
+
+      # NBA-only runs reuse the NFL pages saved by the last full run; without them the full NFL run happens.
+      - name: Restore NFL pages from the last full run
+        id: nflsite
+        if: env.NBA_ONLY == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: site-data
+          key: nfl-site-${{ github.run_id }}
+          restore-keys: nfl-site-
 
       - uses: actions/setup-python@v5
         with:
@@ -45,6 +62,7 @@ jobs:
       # Older seasons never change; keeping them between runs avoids re-downloading them.
       # Current-season files and the schedule are refreshed by the importer when older than 6 hours.
       - name: Restore downloaded nflverse files
+        if: env.NBA_ONLY != 'true' || steps.nflsite.outputs.cache-matched-key == ''
         uses: actions/cache@v4
         with:
           path: data/raw
@@ -53,6 +71,7 @@ jobs:
 
       # Sportsbook price snapshots (The Odds API) are kept between runs so the weekly fetch is reused.
       - name: Restore sportsbook price snapshots
+        if: env.NBA_ONLY != 'true' || steps.nflsite.outputs.cache-matched-key == ''
         uses: actions/cache@v4
         with:
           path: data/odds
@@ -60,9 +79,11 @@ jobs:
           restore-keys: odds-
 
       - name: Install backend
+        if: env.NBA_ONLY != 'true' || steps.nflsite.outputs.cache-matched-key == ''
         run: pip install -r backend/requirements.txt
 
       - name: Download, import, validate and predict
+        if: env.NBA_ONLY != 'true' || steps.nflsite.outputs.cache-matched-key == ''
         working-directory: backend
         env:
           # Optional repository secret. Without it the site still builds and prices are typed in by hand.
@@ -72,12 +93,29 @@ jobs:
         run: python -m engine.cli all --download
 
       - name: Check engine invariants
+        if: env.NBA_ONLY != 'true' || steps.nflsite.outputs.cache-matched-key == ''
         working-directory: backend
         run: python -m pytest -q
 
       - name: Export every page's data
+        if: env.NBA_ONLY != 'true' || steps.nflsite.outputs.cache-matched-key == ''
         working-directory: backend
         run: python -m engine.export_static
+
+      - name: Save NFL pages for NBA-only runs
+        if: env.NBA_ONLY != 'true' || steps.nflsite.outputs.cache-matched-key == ''
+        uses: actions/cache/save@v4
+        with:
+          path: site-data
+          key: nfl-site-${{ github.run_id }}
+
+      # NBA numbers are computed by the "Collect NBA data" workflow and kept in the cache.
+      - name: Restore NBA pages
+        uses: actions/cache/restore@v4
+        with:
+          path: site-data/nba
+          key: nba-site-${{ github.run_id }}
+          restore-keys: nba-site-
 
       - name: Build website
         working-directory: frontend
