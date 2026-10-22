@@ -117,6 +117,10 @@ October 2026 run: 15,899 events, 341,608 same-game pairs, 21 test weeks. Correla
 
 The browser repeats the same model (`frontend/src/lib/sim.ts`): 40,000 correlated draws per slip, legs in different games independent.
 
+## Ask
+
+`/ask` (and the question bar on the home page) answers plain-English questions from the site's own numbers: anytime TD picks, one scorer per game, prop sides at the book line or any line ("QBs who throw for 250"), value against the best price, overpriced bets, parlays (40,000 correlated simulations), a player, a team or game, longshots, the injury report and the model's track record, with position, team, day and count filters. The built-in engine (`frontend/src/lib/ask.ts`) is free and never invents a number. Optionally a visitor can paste their own Anthropic API key (kept only in that browser) to have Claude handle any wording; it can only answer through tools that call the same engine (`frontend/src/lib/askAi.ts`).
+
 ## Sportsbook prices (optional)
 
 `engine/odds.py` reads current prices from The Odds API (a licensed feed; scraping sportsbook sites is against their terms) for anytime TD, receptions, receiving yards, rushing yards, passing yards and passing TDs across US books. Add a free key at the-odds-api.com as the repository secret `ODDS_API_KEY`. Each fetch costs about 6 credits per game (about 90-100 a week); the free plan has 500 a month, so the hosted site fetches on the Saturday run and on manual runs only, and keeps the snapshot between runs. Without a key, prices are typed in. Locally: `ODDS_API_KEY=... python -m engine.odds`.

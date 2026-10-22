@@ -1,6 +1,7 @@
-import { Link } from "react-router-dom";
+import * as React from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { ArrowRight, BadgeDollarSign, ChevronDown, Crosshair, Dices, ShieldAlert, Target, TrendingUp } from "lucide-react";
+import { ArrowRight, ArrowUp, MessageCircleQuestion, BadgeDollarSign, ChevronDown, Crosshair, Dices, ShieldAlert, Target, TrendingUp } from "lucide-react";
 import { api } from "@/lib/api";
 import { chicago, cn, kickoff, num, pct } from "@/lib/format";
 import { tierFor, useConfidence } from "@/lib/confidence";
@@ -39,6 +40,7 @@ export default function OverviewPage() {
         <Link to={`/builder${suffix}`}><Button variant="primary"><Dices className="h-4 w-4" />Build a parlay</Button></Link>
       </PageTitle>
 
+      <AskBar suffix={suffix} />
       {d && !d.data_loaded && <Card><NoDataState /></Card>}
       {d?.error && <Notice tone="danger" title="Last data refresh stopped">{d.error}</Notice>}
       {completed && <Notice tone="info">This week is finished. The picks were made before kickoff using earlier games only; results are shown.</Notice>}
@@ -297,5 +299,25 @@ function TrackRecordCard({ p, loading, suffix }: { p: Overview["model_performanc
         )}
       </CardBody>
     </Card>
+  );
+}
+
+/** Question box on the home page; answers open on the Ask page. */
+function AskBar({ suffix }: { suffix: string }) {
+  const navigate = useNavigate();
+  const [q, setQ] = React.useState("");
+  const go = (text: string) => {
+    const p = new URLSearchParams(suffix.replace(/^\?/, ""));
+    p.set("q", text);
+    navigate(`/ask?${p.toString()}`);
+  };
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); if (q.trim()) go(q.trim()); }}
+      className="flex items-center gap-2 rounded-xl border border-line bg-surface p-2">
+      <MessageCircleQuestion className="ml-1 h-5 w-5 shrink-0 text-accent" aria-hidden />
+      <input aria-label="Ask a question" value={q} onChange={(e) => setQ(e.target.value)} placeholder='Ask anything, e.g. "one TD scorer from each game"'
+        className="h-9 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted" />
+      <button type="submit" aria-label="Ask" disabled={!q.trim()} className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-white disabled:opacity-40"><ArrowUp className="h-4 w-4" /></button>
+    </form>
   );
 }

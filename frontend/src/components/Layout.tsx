@@ -2,7 +2,7 @@ import * as React from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity, BarChart3, Database, Dices, Flame, LayoutDashboard, ListOrdered, Moon, Settings, Shield, SlidersHorizontal, Sun, Target, Menu, X,
+  Activity, BarChart3, Database, Dices, MessageCircleQuestion, Flame, LayoutDashboard, ListOrdered, Moon, Settings, Shield, SlidersHorizontal, Sun, Target, Menu, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/format";
@@ -13,6 +13,7 @@ type NavItem = { to: string; label: string; short?: string; icon: typeof LayoutD
 const SECTIONS: { title: string; items: NavItem[] }[] = [
   { title: "Picks", items: [
     { to: "/", label: "This week", short: "Home", icon: LayoutDashboard, end: true },
+    { to: "/ask", label: "Ask", icon: MessageCircleQuestion },
     { to: "/builder", label: "Parlay builder", short: "Parlay", icon: Dices },
     { to: "/parlay", label: "Top 3 & locks", short: "Top 3", icon: Target },
   ] },
@@ -31,7 +32,7 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
   ] },
 ];
 const NAV = SECTIONS.flatMap((s) => s.items);
-const MOBILE = [NAV[0], NAV[1], NAV[2], NAV[4]];
+const MOBILE = [NAV[0], NAV[1], NAV[2], NAV[3]];
 
 type Health = { data_loaded: boolean; ready: boolean; calibrated: boolean };
 
