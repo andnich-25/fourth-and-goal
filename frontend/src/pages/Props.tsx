@@ -169,18 +169,7 @@ export default function PropsPage() {
 
   return (
     <div className="space-y-5">
-      <PageTitle kicker={`${season} · Week ${week}`} title="Player props">
-        <Select aria-label="Market" value={market} onChange={(e) => { setMarket(e.target.value); setOpen(null); }} className="w-56">
-          {MARKET_GROUPS.map((g) => (
-            <optgroup key={g.label} label={g.label}>
-              {g.markets.map((k) => {
-                const mm = meta.data?.markets.find((x) => x.market === k);
-                return <option key={k} value={k}>{mm?.label ?? k}{mm ? (mm.validated ? " ✓" : " (research)") : ""}</option>;
-              })}
-            </optgroup>
-          ))}
-        </Select>
-      </PageTitle>
+      <PageTitle kicker={`${season} · Week ${week}`} title="Player props" />
 
       {m && (
         <details className="card group">
@@ -198,6 +187,18 @@ export default function PropsPage() {
       {d?.run_id && (
         <Card>
           <div className="flex flex-wrap items-center gap-3 border-b border-line p-3 sm:p-4">
+            <label className="flex items-center gap-2 text-sm font-medium">Prop
+            <Select aria-label="Market" value={market} onChange={(e) => { setMarket(e.target.value); setOpen(null); }} className="h-9 w-52 font-medium">
+              {MARKET_GROUPS.map((g) => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.markets.map((k) => {
+                    const mm = meta.data?.markets.find((x) => x.market === k);
+                    return <option key={k} value={k}>{mm?.label ?? k}{mm && !mm.validated ? " (projections only)" : ""}</option>;
+                  })}
+                </optgroup>
+              ))}
+            </Select>
+            </label>
             <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted" aria-hidden />
               <Input aria-label="Search players" placeholder="Search players" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
