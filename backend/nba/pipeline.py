@@ -140,7 +140,7 @@ def run(out: Path, log=print, today: str | None = None) -> dict:
               "away": g.away_abbreviation, **odds["games"].get((g.home_abbreviation, g.away_abbreviation), {})}
              for g in slate.itertuples()]
     slate_date = str(slate.game_date.min().date()) if len(slate) else None
-    frozen = freeze(slate_date, rows) if slate_date else None
+    frozen = freeze(slate_date, rows, tip_times(slate)) if slate_date else None
     rec = record(d)
 
     out.mkdir(parents=True, exist_ok=True)
@@ -215,18 +215,32 @@ def p_over_dist(dist: dict, line: float) -> float:
 
 
 # --------------------------------------------------------------------------- frozen leans and the live record
-def freeze(day: str, rows: list[dict]) -> dict:
-    """Save the day's leans once, before games start. Later runs the same day never overwrite them."""
+def freeze(day: str, rows: list[dict], tips: dict | None = None, now: datetime | None = None) -> dict:
+    """Save the day's leans before tip-off. A later run the same day (the pre-tip refresh with the latest injury news)
+    replaces the leans of games that have not started; games already under way keep what was saved before them."""
     f = sources.archive_dir() / "picks" / f"{day}.json"
-    if f.exists():
+    now = now or datetime.now(timezone.utc)
+    started = {gid for gid, t in (tips or {}).items() if t is not None and now >= t}
+    prev = json.loads(f.read_text()) if f.exists() else None
+    if prev and not tips:   # no tip times: never touch a saved day
         return {"date": day, "kept": True}
     picks = [{"player_id": r["player_id"], "player_name": r["player_name"], "team": r["team"], "game_id": r["game_id"],
               "market": r["market"], "line": r["line"], "line_source": r["line_source"], "p_over": round(r["p_over"], 4),
-              "offers": r["offers"]}
-             for r in rows if r["p_over"] is not None and not r["out"] and r["line"] >= report.MIN_LINE]
+              "mean": round(float(r["mean"]), 2) if r.get("mean") is not None else None,
+              "proj_minutes": round(float((r.get("evidence") or {}).get("minutes") or 0), 1) or None, "injury": r.get("injury"), "frozen_at": utcnow(), "offers": r["offers"]}
+             for r in rows if r["p_over"] is not None and not r["out"] and r["line"] >= report.MIN_LINE and r["game_id"] not in started]
+    kept = [p for p in (prev or {}).get("picks", []) if p["game_id"] in started]
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps({"date": day, "frozen_at": utcnow(), "picks": picks}))
-    return {"date": day, "kept": False, "picks": len(picks)}
+    f.write_text(json.dumps({"date": day, "frozen_at": utcnow(), "picks": kept + picks}))
+    return {"date": day, "kept": bool(kept), "picks": len(picks), "kept_started": len(kept), "refreshed": bool(prev)}
+
+
+def tip_times(slate: pd.DataFrame) -> dict:
+    out = {}
+    for g in slate.itertuples():
+        t = pd.to_datetime(getattr(g, "game_date_time", None), utc=True, errors="coerce")
+        out[g.game_id] = None if pd.isna(t) else t.to_pydatetime()
+    return out
 
 
 def _decimal(american: int) -> float:
@@ -252,7 +266,10 @@ def record(d: pd.DataFrame) -> dict:
             prices = [o["price"] for o in p.get("offers", []) if o["side"] == side]
             best = max(prices, key=_decimal) if prices else None
             rows.append({"date": s["date"], "market": p["market"], "side": side, "lean": lean, "won": won,
-                         "best": best, "edge": lean - 1 / _decimal(best) if best else None})
+                         "best": best, "edge": lean - 1 / _decimal(best) if best else None,
+                         "mean": p.get("mean"), "actual": val, "player_id": p["player_id"], "team": p["team"], "game_id": key[0],
+                         "line": p["line"], "proj_minutes": p.get("proj_minutes"), "minutes": float(box.loc[key, "minutes"]),
+                         "injury": p.get("injury")})
     if not rows:
         return {"days": 0, "picks": 0, "empty_reason": "The live record starts with the first slate the site projects; "
                                                         "each day's leans are frozen before tip-off and graded the next morning."}
@@ -267,7 +284,70 @@ def record(d: pd.DataFrame) -> dict:
                            "strong_rate": float(g[g.lean >= 0.6].won.mean()) if (g.lean >= 0.6).any() else None}
                           for m, g in r.groupby("market")],
             "vs_books": {"picks": int(len(priced)), "wins": int(priced.won.sum()), "units": units,
-                         "roi": units / len(priced) if len(priced) else None}}
+                         "roi": units / len(priced) if len(priced) else None},
+            "projection_check": projection_check(r), "post_game": post_game_review(r, d)}
+
+
+def projection_check(r: pd.DataFrame) -> list[dict]:
+    """Projections against what happened, per market (one row per player and market, so PRA is not counted 5 times):
+    average miss, and bias (positive = players beat the projection). The models refit every day on these games; a bias
+    that stays well away from 0 for weeks is the sign to look at a market."""
+    r = r[r["mean"].notna()].drop_duplicates(["date", "player_id", "market"])
+    out = []
+    for m, g in r.groupby("market"):
+        err = g.actual - g["mean"]
+        recent = g[g.date >= sorted(g.date.unique())[-7:][0]]
+        out.append({"market": m, "label": props.MARKETS[m], "n": int(len(g)), "avg_miss": round(float(err.abs().mean()), 2),
+                    "bias": round(float(err.mean()), 2), "last7_n": int(len(recent)),
+                    "last7_bias": round(float((recent.actual - recent["mean"]).mean()), 2)})
+    return out
+
+
+def post_game_review(r: pd.DataFrame, d: pd.DataFrame) -> dict:
+    """Re-run each graded projection with what actually happened, to see which input was off.
+
+    * Minutes: the projection scaled to the minutes he really played. The gap between that and the original projection
+      is the part of the miss that came from minutes (foul trouble, a blowout, a rest night, a late scratch); the rest is
+      his production per minute.
+    * Misses that minutes explain: graded leans that lost but would have been right had we known his minutes.
+    * Team scoring: each team's projected rotation points against the points it really scored.
+    """
+    r = r[r["mean"].notna() & r.proj_minutes.notna() & (r.proj_minutes > 0)].drop_duplicates(["date", "player_id", "market"]).copy()
+    if r.empty:
+        return {"n": 0}
+    r["with_minutes"] = r["mean"] * r.minutes / r.proj_minutes
+    r["minutes_part"] = r.with_minutes - r["mean"]
+    r["rate_part"] = r.actual - r.with_minutes
+    lost = r[r.won == 0]
+    fixed = lost[(lost.with_minutes > lost.line) == (lost.actual > lost.line)]
+    by_market = [{"market": m, "label": props.MARKETS[m], "n": int(len(g)),
+                  "minutes_part": round(float(g.minutes_part.abs().mean()), 2), "rate_part": round(float(g.rate_part.abs().mean()), 2),
+                  "minutes_bias": round(float((g.minutes - g.proj_minutes).mean()), 1)} for m, g in r.groupby("market")]
+    pts = r[r.market == "points"]
+    team_rows = []
+    if len(pts):
+        played = d[d.played]
+        actual = played.groupby(["game_id", "team"]).points.sum()
+        for (gid, team), g in pts.groupby(["game_id", "team"]):
+            if (gid, team) in actual.index:
+                team_rows.append({"proj": float(g["mean"].sum()), "actual_rotation": float(g.actual.sum()), "team_actual": float(actual[(gid, team)])})
+    tr = pd.DataFrame(team_rows)
+    flagged = r[r.injury.notna()]
+    once = r.drop_duplicates(["date", "player_id"])   # minutes are per player-game, not per prop
+    return {
+        "n": int(len(r)), "lost": int(len(lost)), "lost_minutes_explain": int(len(fixed)),
+        "by_market": by_market,
+        "minutes": {"avg_miss": round(float((once.minutes - once.proj_minutes).abs().mean()), 1),
+                    "bias": round(float((once.minutes - once.proj_minutes).mean()), 1), "players": int(len(once))},
+        "team_rotation": {"games": int(len(tr)), "bias": round(float((tr.actual_rotation - tr.proj).mean()), 1),
+                          "avg_miss": round(float((tr.actual_rotation - tr.proj).abs().mean()), 1)} if len(tr) else None,
+        "injury_listed": {"n": int(len(flagged)), "hit": round(float(flagged.won.mean()), 3) if len(flagged) else None,
+                          "minutes_bias": round(float((flagged.minutes - flagged.proj_minutes).mean()), 1) if len(flagged) else None},
+        "biggest_misses": [{"date": x.date, "player_id": x.player_id, "market": x.market, "line": x.line, "projected": round(x["mean"], 1),
+                            "actual": x.actual, "proj_minutes": x.proj_minutes, "minutes": x.minutes,
+                            "cause": "minutes" if abs(x.minutes_part) > abs(x.rate_part) else "production"}
+                           for _, x in lost.reindex((lost.actual - lost["mean"]).abs().sort_values(ascending=False).index).head(10).iterrows()],
+    }
 
 
 # --------------------------------------------------------------------------- player pages

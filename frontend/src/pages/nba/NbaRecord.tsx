@@ -1,6 +1,6 @@
 import { Check, X } from "lucide-react";
 import { cn, num, pct } from "@/lib/format";
-import { useNba, type MarketReport, type NbaConfidence, type NbaCorrelation, type NbaDue, type NbaRecord as Rec } from "@/lib/nba";
+import { useNba, type PostGame, type MarketReport, type NbaConfidence, type NbaCorrelation, type NbaDue, type NbaRecord as Rec } from "@/lib/nba";
 import type { Tier } from "@/lib/confidence";
 import { PageTitle } from "@/components/Layout";
 import { Badge, Card, CardBody, CardHeader, LoadingBlock, Notice, TableWrap, Td, Th } from "@/components/ui";
@@ -29,6 +29,37 @@ export function TierTable({ tiers, label = "Picks" }: { tiers: Tier[]; label?: s
   );
 }
 
+const signed = (v: number | null | undefined, d = 1) => (v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(d)}`);
+
+function PostGameCard({ pg, check }: { pg: PostGame; check: NonNullable<Rec["projection_check"]> }) {
+  const bias = Object.fromEntries(check.map((c) => [c.market, c]));
+  return (
+    <Card>
+      <CardHeader title="Post-game review" subtitle="Every graded projection re-run with the minutes each player really played, to see which input was off" />
+      <CardBody className="space-y-4 text-sm">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border border-line p-3"><div className="label">Minutes vs projected</div>
+            <div className="text-lg font-semibold">{signed(pg.minutes?.bias)} min</div><div className="text-xs text-muted">off by {num(pg.minutes?.avg_miss, 1)} on average ({pg.minutes?.players} player-games)</div></div>
+          <div className="rounded-lg border border-line p-3"><div className="label">Losses minutes explain</div>
+            <div className="text-lg font-semibold">{pg.lost_minutes_explain} of {pg.lost}</div><div className="text-xs text-muted">right side had we known his minutes</div></div>
+          <div className="rounded-lg border border-line p-3"><div className="label">Team rotation points</div>
+            <div className="text-lg font-semibold">{signed(pg.team_rotation?.bias)}</div><div className="text-xs text-muted">vs projected, off by {num(pg.team_rotation?.avg_miss, 1)} ({pg.team_rotation?.games ?? 0} team-games)</div></div>
+        </div>
+        <TableWrap><table className="w-full">
+          <thead><tr><Th>Market</Th><Th className="text-right">Graded</Th><Th className="text-right" title="Actual minus projected: positive means players beat the projection">Bias</Th><Th className="text-right">Last 7 days</Th><Th className="text-right">Miss from minutes</Th><Th className="text-right">Miss from production</Th></tr></thead>
+          <tbody>{(pg.by_market ?? []).map((m) => (
+            <tr key={m.market} className="border-b border-line/60"><Td>{m.label}</Td><Td className="text-right">{m.n.toLocaleString()}</Td>
+              <Td className="text-right">{signed(bias[m.market]?.bias, 2)}</Td><Td className="text-right text-muted">{signed(bias[m.market]?.last7_bias, 2)}</Td>
+              <Td className="text-right">{num(m.minutes_part, 2)}</Td><Td className="text-right">{num(m.rate_part, 2)}</Td></tr>
+          ))}</tbody>
+        </table></TableWrap>
+        {pg.injury_listed?.n ? <p className="text-muted">Players on the injury report when we saved the lean: {pg.injury_listed.n} props, {pct(pg.injury_listed.hit, 0)} hit, minutes {signed(pg.injury_listed.minutes_bias)} vs projected.</p> : null}
+        <p className="text-xs text-muted">The models refit every day on these games. A run of misses from minutes points at playing-time news (the late injury run exists for that); a bias that stays away from 0 for weeks in one market is the signal to retune it.</p>
+      </CardBody>
+    </Card>
+  );
+}
+
 export default function NbaRecord() {
   const markets = useNba<{ markets: MarketReport[] }>("markets.json");
   const conf = useNba<NbaConfidence>("confidence.json");
@@ -52,6 +83,8 @@ export default function NbaRecord() {
           </>)}
         </CardBody>
       </Card>
+
+      {rec.data?.post_game && rec.data.post_game.n > 0 && <PostGameCard pg={rec.data.post_game} check={rec.data.projection_check ?? []} />}
 
       {c && (
         <Card>

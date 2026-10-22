@@ -67,13 +67,37 @@ def test_alpha_bands_widen_for_short_minutes():
     assert b[0] > 0.3 and b[-1] < 0.05
 
 
-def test_freeze_keeps_first_projection(tmp_path, monkeypatch):
+def test_freeze_keeps_first_projection_without_tip_times(tmp_path, monkeypatch):
     monkeypatch.setenv("NBA_ARCHIVE_DIR", str(tmp_path))
     row = {"player_id": "1", "player_name": "A", "team": "BOS", "game_id": 5, "market": "points", "line": 20.5,
            "line_source": "usual", "p_over": 0.61, "offers": [], "out": False}
     assert pipeline.freeze("2026-10-22", [row])["picks"] == 1
     assert pipeline.freeze("2026-10-22", [dict(row, p_over=0.2)])["kept"]
     assert json.loads((tmp_path / "picks" / "2026-10-22.json").read_text())["picks"][0]["p_over"] == 0.61
+
+
+def test_pre_tip_refresh_replaces_only_games_not_started(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    monkeypatch.setenv("NBA_ARCHIVE_DIR", str(tmp_path))
+    row = {"player_id": "1", "player_name": "A", "team": "BOS", "market": "points", "line": 20.5,
+           "line_source": "usual", "offers": [], "out": False, "mean": 22.0}
+    early, late = datetime(2026, 10, 22, 23, 0, tzinfo=timezone.utc), datetime(2026, 10, 23, 2, 0, tzinfo=timezone.utc)
+    tips = {5: early, 6: late}
+    morning = [dict(row, game_id=5, p_over=0.61), dict(row, game_id=6, player_id="2", p_over=0.55)]
+    pipeline.freeze("2026-10-22", morning, tips, now=datetime(2026, 10, 22, 16, 0, tzinfo=timezone.utc))
+    # 23:30: game 5 is under way, game 6 gets the late injury news
+    evening = [dict(row, game_id=5, p_over=0.30), dict(row, game_id=6, player_id="2", p_over=0.40)]
+    st = pipeline.freeze("2026-10-22", evening, tips, now=datetime(2026, 10, 22, 23, 30, tzinfo=timezone.utc))
+    assert st["kept_started"] == 1 and st["picks"] == 1
+    saved = {p["game_id"]: p["p_over"] for p in json.loads((tmp_path / "picks" / "2026-10-22.json").read_text())["picks"]}
+    assert saved == {5: 0.61, 6: 0.40}
+
+
+def test_projection_check_reports_bias_and_miss():
+    r = pd.DataFrame({"date": ["d1"] * 4, "market": ["points"] * 4, "player_id": list("abcd"), "mean": [20.0, 10.0, 15.0, 5.0],
+                      "actual": [24.0, 12.0, 15.0, 5.0]})
+    out = pipeline.projection_check(r)[0]
+    assert out["bias"] == 1.5 and out["avg_miss"] == 1.5 and out["n"] == 4
 
 
 def test_team_check_recovers_the_scoring_squeeze_and_scales_an_overloaded_team():
@@ -122,3 +146,15 @@ def test_todays_roster_moves_a_traded_player_to_his_new_team():
     assert set(rows[rows.team == "BOS"].player_id) == {100, 101, 102}
     moved = rows[rows.player_id == 104].iloc[0]
     assert (moved.team, moved.opp, moved.home) == ("NY", "BOS", 0)
+
+
+def test_post_game_review_splits_a_miss_into_minutes_and_production():
+    r = pd.DataFrame({"date": ["d1"] * 3, "market": ["points"] * 3, "player_id": list("abc"), "mean": [20.0, 10.0, 15.0],
+                      "actual": [8.0, 12.0, 15.0], "won": [0, 1, 1], "line": [18.5, 9.5, 14.5], "proj_minutes": [34.0, 24.0, 30.0],
+                      "minutes": [14.0, 26.0, 30.0], "team": ["BOS"] * 3, "game_id": [1] * 3, "injury": [None, "Questionable", None]})
+    d = pd.DataFrame({"game_id": [1] * 3, "team": ["BOS"] * 3, "points": [8, 12, 15], "played": [True] * 3})
+    out = pipeline.post_game_review(r, d)
+    # a played 14 of a projected 34 minutes: at his projected rate that is 8.2 points, so minutes explain the miss
+    assert out["lost"] == 1 and out["lost_minutes_explain"] == 1
+    assert out["biggest_misses"][0]["cause"] == "minutes"
+    assert out["minutes"]["bias"] == -6.0 and out["team_rotation"]["bias"] == -10.0

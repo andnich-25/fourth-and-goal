@@ -42,7 +42,14 @@ export type NbaCorrelation = { use_correlation: boolean; buckets: Buckets; event
 export type NbaDue = { rule: string; markets: Record<string, { label: string; n: number; over_rate: number; model_over: number; beat_projection: number; others_beat_projection: number }> };
 export type NbaRecord = { days: number; picks: number; empty_reason?: string; first_date?: string; last_date?: string; tiers?: Tier[];
   by_market?: { market: string; label: string; n: number; rate: number; strong_n: number; strong_rate: number | null }[];
-  vs_books?: { picks: number; wins: number; units: number; roi: number | null } };
+  vs_books?: { picks: number; wins: number; units: number; roi: number | null };
+  projection_check?: { market: string; label: string; n: number; avg_miss: number; bias: number; last7_n: number; last7_bias: number }[];
+  post_game?: PostGame };
+export type PostGame = { n: number; lost?: number; lost_minutes_explain?: number;
+  by_market?: { market: string; label: string; n: number; minutes_part: number; rate_part: number; minutes_bias: number }[];
+  minutes?: { avg_miss: number; bias: number; players: number }; team_rotation?: { games: number; bias: number; avg_miss: number } | null;
+  injury_listed?: { n: number; hit: number | null; minutes_bias: number | null };
+  biggest_misses?: { date: string; player_id: string; market: string; line: number; projected: number; actual: number; proj_minutes: number; minutes: number; cause: "minutes" | "production" }[] };
 export type NbaStatus = { generated_at: string; season_label: string; slate_date: string | null; slate_games: number; projected_players: number;
   validated_markets: string[]; recency_half_life_seasons: number; injuries_as_of?: string | null;
   team_check?: { use: boolean; test_seasons?: number[]; plain?: TeamCheckScore; adjusted?: TeamCheckScore };
