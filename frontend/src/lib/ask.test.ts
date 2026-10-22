@@ -36,6 +36,8 @@ describe("ask parser", () => {
     ["who is due for a TD", "due"],
     ["What is the safest pick from all 14 games. It can be any prop", "any"],
     ["best bets this week any market", "any"],
+    ["give me the highest rated prop from each game", "pergame"],
+    ["highest rated props this week", "any"],
     ["any unlucky receivers due to bounce back", "due"],
   ])("%s -> %s", (q, intent) => expect(parse(d, q).intent).toBe(intent));
 
@@ -69,7 +71,21 @@ describe("ask parser", () => {
     expect(a.picks?.[0].market).not.toBe(undefined);
     expect(parse(d, "safest pick from each game, any market").intent).toBe("pergame");
     expect(answer(withProps, "safest pick from each game").title).toContain("any market");
+    expect(answer(withProps, "give me the highest rated prop from each game").title).toContain("any market");
+    expect(answer(withProps, "best prop from each game, no TDs").picks?.every((p) => p.market !== "td")).toBe(true);
     expect(answer(d, "one TD scorer from each game").title).toContain("TD scorer");
+  });
+
+  it("leaves out backup quarterbacks and players without a real role", () => {
+    const q = (id: string, name: string, att: number, snap: number) => ({ player_id: id, player_name: name, team: "ATL", opponent: "SF", position: "QB",
+      game_id: "2026_07_SF_ATL", eligible: 1, median: 0, q10: 0, q90: 2, evidence: { interceptions_med: 0, attempts_pg: att, snap_pct: snap },
+      dist: { type: "quantiles" as const, q: Array.from({ length: 99 }, (_, i) => i / 60), platt: [1, 0] as [number, number] } });
+    const wr = { ...q("w", "Deep Reserve", 0, 0.1), position: "WR" };
+    const dd: AskData = { ...d, props: { interceptions: { label: "Interceptions thrown", rows: [q("s", "Starter Qb", 30, 0.98), q("b", "Backup Qb", 15, 0.4), wr] } } };
+    const names = answer(dd, "safest pick any prop, no TDs").picks?.map((p) => p.name) ?? [];
+    expect(names).toContain("Starter Qb");
+    expect(names).not.toContain("Backup Qb");
+    expect(names).not.toContain("Deep Reserve");
   });
 
   it("flags due players from expected vs actual TDs", () => {

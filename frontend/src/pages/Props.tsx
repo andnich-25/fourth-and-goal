@@ -12,6 +12,7 @@ import { Badge, Card, CardBody, ErrorState, Input, LoadingBlock, PosBadge, Segme
 import { Flags, NoDataState, TierBadge } from "@/components/shared";
 import { useConfidence, tierFor } from "@/lib/confidence";
 import { overReasons, underReasons, usualLine, type Recent } from "@/lib/ask";
+import { likelyToPlay, starterQbs } from "@/lib/playing";
 
 export type MarketMeta = {
   market: string; label: string; positions: string[]; kind: string; validated: boolean; model: string | null; tested: boolean;
@@ -119,13 +120,18 @@ export default function PropsPage() {
   const meta = useQuery({ queryKey: ["props-markets"], queryFn: () => api.get<MarketsResp>("/props/markets") });
   const q = useQuery({ queryKey: ["props", season, week, market], queryFn: () => api.get<PropsResp>("/props", { season, week, market }) });
   const conf = useConfidence();
+  const qbRows = useQuery({ queryKey: ["props", season, week, "pass_attempts"], queryFn: () => api.get<PropsResp>("/props", { season, week, market: "pass_attempts" }) });
+  const qbs = React.useMemo(() => starterQbs([...(qbRows.data?.rows ?? []), ...(q.data?.rows ?? [])]), [qbRows.data, q.data]);
   const d = q.data;
   const m = d?.market;
   const stat = ({ pass_attempts: "attempts", rush_rec_yards: "rush_rec_yards" } as Record<string, string>)[market] ?? market;
   const key = (r: PropRow) => `${season}-${week}-${market}-${r.player_id}`;
   const feed = useFeed(season, week);
   // Typed line wins, then the line most books offer, then the player's usual line. Prices are the best one for the lean side.
-  const view = (d?.rows ?? []).filter((r) => !search || r.player_name.toLowerCase().includes(search.toLowerCase())).map((r) => {
+  // Backup QBs and players without a real role are left out unless searched for by name.
+  const playing = (r: PropRow) => !!r.eligible && likelyToPlay({ ...r, snap: r.evidence?.snap_pct }, qbs);
+  const hidden = search ? 0 : (d?.rows ?? []).filter((r) => !playing(r)).length;
+  const view = (d?.rows ?? []).filter((r) => (search ? r.player_name.toLowerCase().includes(search.toLowerCase()) : playing(r))).map((r) => {
     const typed = lines[key(r)] ?? {};
     const fl = feedLine(feed, market, r.player_id);
     const usual = usualLine(r, market) ?? Math.floor(r.median) + 0.5;
@@ -177,7 +183,7 @@ export default function PropsPage() {
             </div>
             {m?.validated && <Segmented size="sm" label="Show" value={show} onChange={setShow}
               options={[{ value: "all", label: "All" }, { value: "under", label: "Leaning under" }, { value: "over", label: "Leaning over" }]} />}
-            <span className="text-sm text-muted">{view.length} players · {m?.validated ? "strongest lean first, inactive players last" : "research projections only"}</span>
+            <span className="text-sm text-muted">{view.length} players · {m?.validated ? "strongest lean first" : "research projections only"}{hidden ? ` · ${hidden} backups and inactive players hidden (search a name to see one)` : ""}</span>
           </div>
           <TableWrap>
             <table className="w-full">

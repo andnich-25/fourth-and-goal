@@ -41,12 +41,12 @@ function tools(d: AskData) {
     }),
     betaTool({
       name: "safest_any_market", description: "The most likely bets across EVERY market (anytime TD and all player props, likelier side), one per player, highest chance first. Use for 'safest pick', 'any prop', 'best bets' questions that do not name a market. Props use book lines when loaded, else the player's usual line (flagged).",
-      inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 25 }, position: POSITION, teams: TEAMS, day: DAY, include_questionable: { type: "boolean" } }, required: ["limit"], additionalProperties: false } as const,
-      run: async (i) => out(answerJson(answerAny(d, i.limit, filters(i)))),
+      inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 25 }, exclude_td: { type: "boolean", description: "Leave out anytime TD bets" }, position: POSITION, teams: TEAMS, day: DAY, include_questionable: { type: "boolean" } }, required: ["limit"], additionalProperties: false } as const,
+      run: async (i) => out(answerJson(answerAny(d, i.limit, filters(i), i.exclude_td))),
     }),
     betaTool({
-      name: "best_per_game", description: "The single most likely leg in each game (anytime TD by default, a prop market, or 'any' for the best leg across all markets), plus how likely several of them hit together.",
-      inputSchema: { type: "object", properties: { market: { type: "string", enum: ["td", "any", ...markets] }, position: POSITION, day: DAY }, additionalProperties: false } as const,
+      name: "best_per_game", description: "The single most likely leg in each game (anytime TD by default, a prop market, or 'any' for the best leg across all markets, 'any-props' for all markets except TD), plus how likely several of them hit together.",
+      inputSchema: { type: "object", properties: { market: { type: "string", enum: ["td", "any", "any-props", ...markets] }, position: POSITION, day: DAY }, additionalProperties: false } as const,
       run: async (i) => out(answerJson(answerPerGame(d, i.market ?? "td", filters(i)))),
     }),
     betaTool({
