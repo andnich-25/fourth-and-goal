@@ -5,7 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaTool } from "@anthropic-ai/sdk/helpers/beta/json-schema.mjs";
 import {
   answerGame, answerInjuries, answerJson, answerParlay, answerPerGame, answerPlayer, answerProps, answerRecord, answerSleepers, answerTop,
-  answerValue, gameLabel, parse, type AskData, type Filters,
+  answerUnders, answerValue, gameLabel, parse, type AskData, type Filters,
 } from "@/lib/ask";
 import { MODEL } from "@/lib/aiKey";
 
@@ -71,6 +71,11 @@ function tools(d: AskData) {
       name: "game_breakdown", description: "Most likely TD scorers and strongest prop sides in the game involving the given team(s).",
       inputSchema: { type: "object", properties: { teams: TEAMS }, required: ["teams"], additionalProperties: false } as const,
       run: async (i) => out(answerJson(answerGame(d, i.teams.map((t) => t.toUpperCase()), {}))),
+    }),
+    betaTool({
+      name: "unders", description: "Players most likely to fall short of a line (unders), with the matchup and form reasons behind each: opponent defense vs the position, recent games, role, team scoring outlook. Uses the book line when loaded, else the player's usual line.",
+      inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 30 }, markets: { type: "array", items: { type: "string", enum: markets } }, position: POSITION, teams: TEAMS, day: DAY }, required: ["limit"], additionalProperties: false } as const,
+      run: async (i) => out(answerJson(answerUnders(d, i.limit, filters(i), i.markets))),
     }),
     betaTool({
       name: "longshot_td", description: "TD picks with a 20-35% chance (bigger payouts), ranked by edge over the best price when prices are loaded.",

@@ -128,14 +128,23 @@ def confidence(c: sqlite3.Connection = Depends(get_db)):
         for market, r in rep["markets"].items():
             model = r["gate"]["promoted"]
             if model:
-                parts.append(pd.read_sql_query("SELECT season, week, p_over, (actual > line) AS y FROM prop_backtest WHERE run_id=? AND market=? "
-                                               "AND model=? AND actual IS NOT NULL", c, params=(rep["run_id"], market, model)))
+                parts.append(pd.read_sql_query("SELECT ? AS market, season, week, p_over, (actual > line) AS y FROM prop_backtest WHERE run_id=? "
+                                               "AND market=? AND model=? AND actual IS NOT NULL", c, params=(market, rep["run_id"], market, model)))
         if parts:
             pb = pd.concat(parts)
             side_p = np.maximum(pb.p_over, 1 - pb.p_over).to_numpy()
             hit = np.where(pb.p_over >= 0.5, pb.y, 1 - pb.y)
             out["props"] = {"weeks": int(pb[["season", "week"]].drop_duplicates().shape[0]), "first_season": int(pb.season.min()),
                             "tiers": _tiers(side_p, hit, PROP_TIERS),
+                            # Overs and unders graded separately, overall and per market: is the model as good at calling a shortfall?
+                            "by_side": {side: _tiers(side_p[m], hit[m], PROP_TIERS) for side, m in
+                                        (("over", (pb.p_over >= 0.5).to_numpy()), ("under", (pb.p_over < 0.5).to_numpy()))},
+                            "unders_by_market": [{"market": mk, "label": props.MARKETS[mk]["label"], "n": int(len(g)),
+                                                  "hits": int((1 - g.y).sum()), "rate": float(1 - g.y.mean()),
+                                                  "avg_chance": float((1 - g.p_over).mean()),
+                                                  "strong_n": int((g.p_over <= 0.35).sum()),
+                                                  "strong_rate": float(1 - g.y[g.p_over <= 0.35].mean()) if (g.p_over <= 0.35).any() else None}
+                                                 for mk, g in pb[pb.p_over < 0.5].groupby("market")],
                             "note": "Prop tiers use the side the model favored at a reference line (the player's recent median), "
                                     "because past sportsbook lines are not available."}
     return out

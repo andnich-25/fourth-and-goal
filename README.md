@@ -121,6 +121,14 @@ The browser repeats the same model (`frontend/src/lib/sim.ts`): 40,000 correlate
 
 `/ask` (and the question bar on the home page) answers plain-English questions from the site's own numbers: anytime TD picks, one scorer per game, prop sides at the book line or any line ("QBs who throw for 250"), value against the best price, overpriced bets, parlays (40,000 correlated simulations), a player, a team or game, longshots, the injury report and the model's track record, with position, team, day and count filters. The built-in engine (`frontend/src/lib/ask.ts`) is free and never invents a number. Optionally a visitor can paste their own Anthropic API key (kept only in that browser) to have Claude handle any wording; it can only answer through tools that call the same engine (`frontend/src/lib/askAi.ts`).
 
+## Props: over and under confidence
+
+The Player props page gives every player an Under score and an Over score out of 10 for the line shown (the book line when loaded, otherwise his usual line: recent median rounded down plus 0.5, or a line you type). The score is the model's chance of that side times 10, so the two always add to 10; the bigger one is the lean, labeled with its confidence tier and the past hit rate for that tier. Rows open to show why: opponent defense against the position compared with the league, recent games against the line, role and team scoring outlook. `/backtest/confidence` tracks overs and unders separately (`by_side`) and unders by market (`unders_by_market`); on 96 unseen weeks, unders the model gave 65%+ hit 73.6% (13,023 picks).
+
+## How it works
+
+`/how` explains the chances, tiers, edge, lines and model inputs in plain language and shows the live ratings: the promoted TD model's accuracy against baselines, the TD and props tier records, overs vs unders, unders by market and the against-the-books record.
+
 ## Sportsbook prices (optional)
 
 `engine/odds.py` reads current prices from The Odds API (a licensed feed; scraping sportsbook sites is against their terms) for anytime TD, receptions, receiving yards, rushing yards, passing yards and passing TDs across US books. Add a free key at the-odds-api.com as the repository secret `ODDS_API_KEY`. Each fetch costs about 6 credits per game (about 90-100 a week); the free plan has 500 a month, so the hosted site fetches on the Saturday run and on manual runs only, and keeps the snapshot between runs. Without a key, prices are typed in. Locally: `ODDS_API_KEY=... python -m engine.odds`.

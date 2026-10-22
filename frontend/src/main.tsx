@@ -18,6 +18,7 @@ import Props from "./pages/Props";
 import Trends from "./pages/Trends";
 import Builder from "./pages/Builder";
 import Ask from "./pages/Ask";
+import How from "./pages/How";
 import { EmptyState } from "./components/ui";
 import { STATIC } from "./lib/api";
 
@@ -45,6 +46,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Route path="defenses" element={<Defenses />} />
               <Route path="defenses/:team" element={<DefenseDetail />} />
               <Route path="players/:id" element={<Player />} />
+              <Route path="how" element={<How />} />
               <Route path="backtest" element={<Backtest />} />
               <Route path="data" element={<DataSync />} />
               <Route path="settings" element={<SettingsPage />} />

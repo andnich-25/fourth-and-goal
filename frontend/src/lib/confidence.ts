@@ -5,7 +5,8 @@ import { api } from "@/lib/api";
 export type Tier = { tier: string; lo: number; hi: number; n: number; hits: number; rate: number | null; avg_chance: number | null; ci: [number | null, number | null] };
 export type Confidence = {
   td: { model: string; weeks: number; first_season: number; tiers: Tier[] } | null;
-  props: { weeks: number; first_season: number; tiers: Tier[]; note: string } | null;
+  props: { weeks: number; first_season: number; tiers: Tier[]; note: string; by_side?: { over: Tier[]; under: Tier[] };
+    unders_by_market?: { market: string; label: string; n: number; hits: number; rate: number; avg_chance: number; strong_n: number; strong_rate: number | null }[] } | null;
 };
 
 export function useConfidence() {

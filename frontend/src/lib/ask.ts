@@ -11,7 +11,7 @@ import type { RankingRow } from "@/lib/types";
 
 export type Recent = { season: number; week: number; opponent: string; value: number };
 export type PropRow = { player_id: string; player_name: string; team: string; opponent: string; position: string; game_id: string; eligible: number;
-  median: number; q10: number; q90: number; dist: PropDist | null; recent?: Recent[] };
+  median: number; q10: number; q90: number; dist: PropDist | null; recent?: Recent[]; evidence?: Record<string, number | null> };
 export type AskData = {
   season: number; week: number; td: RankingRow[]; props: Record<string, { label: string; rows: PropRow[] }>;
   feed: Feed; conf?: Confidence; buckets: Buckets; useCorr: boolean;
@@ -19,7 +19,7 @@ export type AskData = {
 export type Pick = {
   id: string; player_id: string; name: string; team: string; opp: string; pos: string; game_id: string; market: string; label: string;
   p: number; kind: "td" | "props"; side: "yes" | "over" | "under"; line?: number; price?: number; book?: string; edge?: number;
-  tier?: string; tierRate?: number | null; tierData?: Tier; note?: string; median?: number; range?: [number, number]; dist?: PropDist; recent?: Recent[];
+  tier?: string; tierRate?: number | null; tierData?: Tier; note?: string; reasons?: string[]; lineSource?: "book" | "usual"; median?: number; range?: [number, number]; dist?: PropDist; recent?: Recent[];
 };
 export type Answer = {
   title: string; summary: string; picks?: Pick[]; groups?: { title: string; picks: Pick[] }[];
@@ -64,6 +64,9 @@ const NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5
   pair: 2, couple: 2, few: 3, handful: 5, dozen: 12 };
 const DAYS: Record<string, number> = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, tnf: 4, mnf: 1, snf: 0 };
 
+/** Market label inside a sentence: lower case, but keep "TDs" as written. */
+const lc = (s: string) => s.toLowerCase().replace(/\btds?\b/g, (m) => m.toUpperCase().replace("S", "s"));
+
 export const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9+&' ]/g, " ")
   .replace(/'/g, "").replace(/\s+/g, " ").trim();
 
@@ -97,7 +100,7 @@ function propPick(d: AskData, market: string, r: PropRow, line: number, side: "o
   const over = pOver(r.dist as PropDist, line);
   const p = side === "over" ? over : 1 - over;
   const b = bestOf(d.feed.get(market, r.player_id, side).filter((x) => x.line === line));
-  const label = `${side === "over" ? "Over" : "Under"} ${line} ${(d.props[market]?.label ?? market).toLowerCase()}`;
+  const label = `${side === "over" ? "Over" : "Under"} ${line} ${lc(d.props[market]?.label ?? market)}`;
   return withTier(d, {
     id: `${market}:${r.player_id}`, player_id: r.player_id, name: r.player_name, team: r.team, opp: r.opponent, pos: r.position, game_id: r.game_id,
     market, label, p, kind: "props", side, line, price: b?.price, book: b?.book, edge: b ? p - 1 / dec(b.price) : undefined,
@@ -168,9 +171,9 @@ export function answerPerGame(d: AskData, market: string, f: Filters): Answer {
   const byGame = new Map<string, Pick>();
   for (const p of pool) if (!byGame.has(p.game_id)) byGame.set(p.game_id, p);
   const picks = [...byGame.values()].sort((a, b) => b.p - a.p);
-  if (!picks.length) return none(d, market === "td" ? "No TD chances for these games" : `No ${d.props[market]?.label.toLowerCase() ?? market} lines yet`, f);
+  if (!picks.length) return none(d, market === "td" ? "No TD chances for these games" : `No ${(d.props[market] && lc(d.props[market].label)) ?? market} lines yet`, f);
   const sim = simulate(picks.map(toSim), d.buckets, d.useCorr, 20000);
-  const what = market === "td" ? "TD scorer" : `${d.props[market]?.label.toLowerCase()} pick`;
+  const what = market === "td" ? "TD scorer" : `${(d.props[market] && lc(d.props[market].label))} pick`;
   return {
     title: `Best ${what} from each game${describe(f) ? ` (${describe(f)})` : ""}`,
     summary: `The single most likely ${market === "td" ? "scorer" : "leg"} in each of ${picks.length} games, strongest first.`,
@@ -199,10 +202,10 @@ export function answerProps(d: AskData, market: string, n: number, f: Filters, s
     };
   }
   return {
-    title: line != null ? `Most likely to go ${side === "under" ? "under" : "over"} ${line} ${label.toLowerCase()}${describe(f) ? ` (${describe(f)})` : ""}`
-      : `Best ${side ?? "over/under"} ${label.toLowerCase()} picks${describe(f) ? ` (${describe(f)})` : ""}`,
-    summary: line != null ? `Chance each player clears ${line}, from the validated ${label.toLowerCase()} model. Prices are shown only where a book offers that exact line.`
-      : `Most likely side at the line most books offer, from the validated ${label.toLowerCase()} model.`,
+    title: line != null ? `Most likely to go ${side === "under" ? "under" : "over"} ${line} ${lc(label)}${describe(f) ? ` (${describe(f)})` : ""}`
+      : `Best ${side ?? "over/under"} ${lc(label)} picks${describe(f) ? ` (${describe(f)})` : ""}`,
+    summary: line != null ? `Chance each player clears ${line}, from the validated ${lc(label)} model. Prices are shown only where a book offers that exact line.`
+      : `Most likely side at the line most books offer, from the validated ${lc(label)} model.`,
     picks: uniq, notes: [...noteTier(uniq), ...priceNote(d)], followups: [`${label} best value`, "Safest 3-leg parlay", "One TD scorer from each game"],
   };
 }
@@ -324,6 +327,105 @@ export function answerAvoid(d: AskData, n: number, f: Filters): Answer {
   };
 }
 
+/* ------------------------------------------------------------------ unders: where a player falls short */
+const STAT: Record<string, string> = { pass_attempts: "attempts" };
+const statOf = (m: string) => STAT[m] ?? m;
+const POS_NAME: Record<string, string> = { QB: "quarterbacks", RB: "running backs", WR: "receivers", TE: "tight ends" };
+const YARDS = new Set(["pass_yards", "rush_yards", "rec_yards", "rush_rec_yards", "pass_tds"]);
+
+/** The usual line for a player: his recent median rounded to a book-style half point (the line the backtest graded). */
+export function usualLine(r: PropRow, market: string): number | null {
+  const m = r.evidence?.[`${statOf(market)}_med`];
+  return m == null ? null : Math.floor(m) + 0.5;
+}
+
+/** Plain reasons a player may fall short of a line, strongest first, from pregame data only. */
+export function underReasons(r: PropRow, market: string, label: string, line: number): string[] {
+  const e = r.evidence ?? {};
+  const st = statOf(market);
+  const out: { w: number; t: string }[] = [];
+  const lab = lc(label);
+  const mult = e[`opp_${st}_mult`];
+  if (mult != null && mult <= 0.95) out.push({ w: 1 - mult, t: `${r.opponent} allows ${Math.round((1 - mult) * 100)}% fewer ${lab} to ${POS_NAME[r.position] ?? r.position} than average` });
+  const rec = r.recent ?? [];
+  if (rec.length >= 4) {
+    const k = rec.filter((g) => g.value < line).length;
+    if (k / rec.length >= 0.6) out.push({ w: (k / rec.length - 0.5), t: `Under ${line} in ${k} of his last ${rec.length} games` });
+  }
+  const l3 = e[`${st}_l3`];
+  if (l3 != null && l3 < line) out.push({ w: Math.min(0.4, (line - l3) / Math.max(line, 1)), t: `Averaging ${num1(l3)} over his last 3 games` });
+  const med = e[`${st}_med`];
+  if (med != null && med < line - 0.5) out.push({ w: Math.min(0.3, (line - med) / Math.max(line, 1)), t: `His typical game is ${num1(med)}` });
+  const tt = e.team_implied_total;
+  if (tt != null && tt <= 20 && YARDS.has(market)) out.push({ w: (21 - tt) / 40, t: `Team projected for only ${num1(tt)} points` });
+  const share = e.targets_share ?? e.carries_share;
+  if (share != null && share < 0.15 && ["rec_yards", "receptions", "rush_yards", "carries", "rush_rec_yards"].includes(market)) out.push({ w: 0.1, t: `Only ${Math.round(share * 100)}% of his team's ${e.targets_share != null ? "targets" : "carries"}` });
+  const snap = e.snap_pct;
+  if (snap != null && snap < 0.6 && r.position !== "QB") out.push({ w: 0.08, t: `Plays ${Math.round(snap * 100)}% of snaps` });
+  return out.sort((a, b) => b.w - a.w).slice(0, 3).map((x) => x.t);
+}
+/** Plain reasons a player may clear a line, strongest first, from pregame data only. */
+export function overReasons(r: PropRow, market: string, label: string, line: number): string[] {
+  const e = r.evidence ?? {};
+  const st = statOf(market);
+  const out: { w: number; t: string }[] = [];
+  const mult = e[`opp_${st}_mult`];
+  if (mult != null && mult >= 1.05) out.push({ w: mult - 1, t: `${r.opponent} allows ${Math.round((mult - 1) * 100)}% more ${lc(label)} to ${POS_NAME[r.position] ?? r.position} than average` });
+  const rec = r.recent ?? [];
+  if (rec.length >= 4) {
+    const k = rec.filter((g) => g.value > line).length;
+    if (k / rec.length >= 0.6) out.push({ w: (k / rec.length - 0.5), t: `Over ${line} in ${k} of his last ${rec.length} games` });
+  }
+  const l3 = e[`${st}_l3`];
+  if (l3 != null && l3 > line) out.push({ w: Math.min(0.4, (l3 - line) / Math.max(line, 1)), t: `Averaging ${num1(l3)} over his last 3 games` });
+  const med = e[`${st}_med`];
+  if (med != null && med > line + 0.5) out.push({ w: Math.min(0.3, (med - line) / Math.max(line, 1)), t: `His typical game is ${num1(med)}` });
+  const tt = e.team_implied_total;
+  if (tt != null && tt >= 25 && YARDS.has(market)) out.push({ w: (tt - 24) / 40, t: `Team projected for ${num1(tt)} points` });
+  const share = e.targets_share ?? e.carries_share;
+  if (share != null && share >= 0.25 && ["rec_yards", "receptions", "rush_yards", "carries", "rush_rec_yards"].includes(market)) out.push({ w: 0.1, t: `Gets ${Math.round(share * 100)}% of his team's ${e.targets_share != null ? "targets" : "carries"}` });
+  return out.sort((a, b) => b.w - a.w).slice(0, 3).map((x) => x.t);
+}
+const num1 = (v: number) => (Math.abs(v) >= 10 ? v.toFixed(0) : v.toFixed(1));
+
+/** Under legs across markets: at the book line when books offer one, otherwise at the player's usual line. */
+export function underPool(d: AskData, f: Filters = {}, markets?: string[], minChance = 0.55): Pick[] {
+  const out: Pick[] = [];
+  for (const m of markets ?? Object.keys(d.props)) {
+    const label = d.props[m]?.label ?? m;
+    for (const r of d.props[m]?.rows ?? []) {
+      if (!r.eligible || !r.dist) continue;
+      if (!keep(d, f, { pos: r.position, team: r.team, opp: r.opponent, game_id: r.game_id })) continue;
+      const book = feedLine(d.feed, m, r.player_id);
+      const line = book ?? usualLine(r, m);
+      if (line == null || line <= 0) continue;
+      const p = propPick(d, m, r, line, "under");
+      if (p.p < minChance) continue;
+      out.push({ ...p, lineSource: book != null ? "book" : "usual", reasons: underReasons(r, m, label, line) });
+    }
+  }
+  return out.sort((a, b) => b.p - a.p);
+}
+
+export function answerUnders(d: AskData, n: number, f: Filters, markets?: string[]): Answer {
+  const pool = underPool(d, f, markets).filter((p) => p.reasons?.length);
+  const seen = new Set<string>();
+  const picks = pool.filter((p) => (seen.has(p.player_id) ? false : (seen.add(p.player_id), true))).slice(0, n);
+  const what = markets?.length === 1 ? (d.props[markets[0]] ? lc(d.props[markets[0]].label) : "") + " " : "";
+  if (!picks.length) return none(d, `No strong ${what}unders${describe(f) ? ` for ${describe(f)}` : ""}`, f);
+  const usual = picks.some((p) => p.lineSource === "usual");
+  const u = d.conf?.props?.by_side?.under;
+  return {
+    title: `Where players should fall short: ${what}unders${describe(f) ? ` (${describe(f)})` : ""}`,
+    summary: "Most likely unders, with the matchup and form behind each one: the opponent's defense against that position, recent games, role and team scoring outlook.",
+    picks, notes: [
+      ...(usual ? ["Where no book line is loaded yet, the line shown is the player's usual line (his recent median, rounded to a half point), the same line the track record grades."] : []),
+      ...(u ? [`Track record for unders: ${u.map((t) => `${t.tier} ${t.rate != null ? pct(t.rate) : "–"} of ${t.n.toLocaleString()}`).join(", ")}.`] : []),
+      ...priceNote(d)],
+    followups: ["Receiving yards unders", "Passing yards unders", "Best value bets"],
+  };
+}
+
 export function answerSleepers(d: AskData, n: number, f: Filters): Answer {
   const pool = tdPool(d, f).filter((p) => p.p >= 0.2 && p.p < 0.35);
   const picks = (d.feed.at ? pool.filter((p) => p.edge != null).sort((a, b) => (b.edge as number) - (a.edge as number)) : pool).slice(0, n);
@@ -367,6 +469,7 @@ export function toSim(p: Pick): SimLeg {
 /* ------------------------------------------------------------------ question parsing */
 export const EXAMPLES = [
   "Give me one TD scorer from each game this week",
+  "Who will fall short this week?",
   "Top 5 TD scorers",
   "Safest 3-leg parlay",
   "Best value bets this week",
@@ -457,6 +560,7 @@ export function parse(d: AskData, raw: string): Parsed {
   if (/\b(avoid|fade|stay away|overpriced|overrated|traps?|worst bets?|bad bets?)\b/.test(q)) return { ...base, intent: "avoid" };
   if (/\b(each|every|per|all) (game|matchup|contest)s?\b|\bfrom every\b|\bgame by game\b|\beach of the games\b/.test(q)) return { ...base, intent: "pergame" };
   if (/\b(parlay|parlays|legs?|slip|accumulator|multi)\b/.test(q)) return { ...base, intent: "parlay" };
+  if (/\b(fall short|come up short|struggle|won'?t (hit|reach|get)|held (in check|under)|shut ?down|bust|unders?)\b/.test(q) && !/\b(parlay|each|every)\b/.test(q)) return { ...base, intent: "unders" };
   if (/\b(longshots?|long shots?|sleepers?|dark ?horse|big payout|plus money|underdogs? to score|lottery)\b/.test(q)) return { ...base, intent: "sleepers" };
   if (pl.ids.length && !/\b(top|best|safest|most likely|highest)\b/.test(q) && line == null) return { ...base, intent: "player" };
   if (value) return { ...base, intent: "value" };
@@ -480,6 +584,7 @@ export function answer(d: AskData, raw: string): Answer {
     case "sleepers": a = answerSleepers(d, p.n ?? 6, f); break;
     case "player": a = answerPlayer(d, p.players.slice(0, 3), p.market ?? (/\b(td|touchdown|score)/.test(norm(raw)) ? "td" : undefined)); break;
     case "avoid": a = answerAvoid(d, p.n ?? 8, f); break;
+    case "unders": a = p.line != null && p.market ? answerProps(d, p.market, p.n ?? 10, f, "under", p.line) : answerUnders(d, p.n ?? 8, f, p.market ? [p.market] : undefined); break;
     case "value": a = answerValue(d, p.n ?? 8, f, p.market ? [p.market] : /\b(tds?|touchdowns?|scor)/.test(norm(raw)) ? ["td"] : undefined); break;
     case "props": a = answerProps(d, p.market as string, p.n ?? (p.line != null ? 10 : 8), f, p.side, p.line); break;
     case "game": a = answerGame(d, f.teams as string[], f); break;
@@ -496,7 +601,8 @@ export const pickJson = (p: Pick) => ({ player: p.name, team: p.team, opponent: 
   our_chance: Number(p.p.toFixed(3)), best_price: p.price != null ? fmtPrice(p.price) : null, book: p.book ?? null,
   price_implied_chance: p.price != null ? Number((1 / dec(p.price)).toFixed(3)) : null, edge: p.edge != null ? Number(p.edge.toFixed(3)) : null,
   tier: p.tier ?? null, tier_past_hit_rate: p.tierRate != null ? Number(p.tierRate.toFixed(3)) : null, note: p.note ?? null,
-  projection: p.median != null ? { median: p.median, range_10_90: p.range } : null });
+  projection: p.median != null ? { median: p.median, range_10_90: p.range } : null, reasons: p.reasons ?? null,
+  line_source: p.lineSource === "usual" ? "player's usual line (no book line loaded)" : p.line != null ? "book line" : null });
 
 export const answerJson = (a: Answer) => ({ title: a.title, summary: a.summary, picks: a.picks?.map(pickJson),
   groups: a.groups?.map((g) => ({ title: g.title, picks: g.picks.map(pickJson) })), parlay: a.parlay ?? null,

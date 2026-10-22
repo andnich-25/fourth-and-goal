@@ -2,7 +2,7 @@ import * as React from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity, BarChart3, Database, Dices, MessageCircleQuestion, Flame, LayoutDashboard, ListOrdered, Moon, Settings, Shield, SlidersHorizontal, Sun, Target, Menu, X,
+  Activity, BarChart3, BookOpen, Database, Dices, MessageCircleQuestion, Flame, LayoutDashboard, ListOrdered, Moon, Settings, Shield, SlidersHorizontal, Sun, Target, Menu, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/format";
@@ -24,6 +24,7 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
     { to: "/defenses", label: "Defenses", icon: Shield },
   ] },
   { title: "Proof", items: [
+    { to: "/how", label: "How it works", icon: BookOpen },
     { to: "/backtest", label: "Track record", icon: BarChart3 },
   ] },
   { title: "", items: [

@@ -31,6 +31,8 @@ describe("ask parser", () => {
     ["bets to avoid", "avoid"],
     ["longshot TD picks", "sleepers"],
     ["what can you do", "help"],
+    ["Who will fall short this week?", "unders"],
+    ["best unders for receivers", "unders"],
   ])("%s -> %s", (q, intent) => expect(parse(d, q).intent).toBe(intent));
 
   it("reads filters, counts and lines", () => {

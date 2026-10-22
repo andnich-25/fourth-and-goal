@@ -195,7 +195,7 @@ function AnswerView({ a, data, onAsk, season, week }: { a: Answer; data: AskData
   );
 }
 
-function PickList({ picks, suffix }: { picks: Pick[]; suffix: string }) {
+export function PickList({ picks, suffix }: { picks: Pick[]; suffix: string }) {
   return (
     <ul className="divide-y divide-line">
       {picks.map((p) => (
@@ -210,8 +210,10 @@ function PickList({ picks, suffix }: { picks: Pick[]; suffix: string }) {
               <span className="text-fg">{p.label}</span>
               {p.price != null && <span>{fmtPrice(p.price)} at {p.book}</span>}
               {p.edge != null && p.edge >= 0.03 && <Badge tone="ok">+{Math.round(p.edge * 100)} pts vs book</Badge>}
+              {p.lineSource === "usual" && <span title="No book line loaded yet: this is his recent median rounded to a half point">usual line</span>}
               {p.note && <Badge tone="warn">{p.note}</Badge>}
             </div>
+            {p.reasons && p.reasons.length > 0 && <ul className="mt-1 space-y-0.5 text-xs text-muted">{p.reasons.map((r) => <li key={r}>• {r}</li>)}</ul>}
           </div>
           <div className="text-right">
             <div className="font-display text-lg font-semibold">{pct(p.p, 0)}</div>

@@ -27,7 +27,7 @@ const LABEL: Record<string, string> = {
 type OddsRecord = { weeks: number; picks: number; wins?: number; win_rate?: number | null; avg_implied?: number | null; units?: number; roi?: number | null;
   priced_legs?: number; note?: string; empty_reason?: string };
 
-function TierTable({ title, sub, tiers }: { title: string; sub: string; tiers: Tier[] }) {
+export function TierTable({ title, sub, tiers }: { title: string; sub: string; tiers: Tier[] }) {
   return (
     <div>
       <div className="text-sm font-medium">{title}</div><div className="mb-2 text-xs text-muted">{sub}</div>
