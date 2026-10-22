@@ -4,7 +4,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaTool } from "@anthropic-ai/sdk/helpers/beta/json-schema.mjs";
 import {
-  answerAny, answerDefense, answerDue, answerGames, answerGlossary, answerHitRates, answerLadder, answerLeaders, answerWhy, answerGame, answerInjuries, answerJson, answerParlay, answerPerGame, answerPlayer, answerProps, answerRecord, answerSleepers, answerTop,
+  answerAny, answerDefense, answerDue, answerGames, answerGlossary, answerHitRates, answerLadder, answerLeaders, answerWhy, answerGame, answerInjuries, answerJson, answerParlay, answerPerGame, answerPlayer, answerPlayerLine, answerPriceCheck, answerProps, answerRecord, answerSleepers, answerTop,
   answerUnders, answerValue, gameLabel, parse, type AskData, type Filters,
 } from "@/lib/ask";
 import { MODEL } from "@/lib/aiKey";
@@ -142,6 +142,22 @@ function tools(d: AskData) {
       run: async (i) => out(answerJson(answerInjuries(d, filters(i)))),
     }),
     betaTool({
+      name: "player_line", description: "One player's chance at an exact line in one prop market ('Will Puka go over 6.5 receptions?', 'Goff 2+ passing TDs' = pass_tds over 1.5, 'Mahomes 250 passing yards' = over 249.5), with his recent games against that line and whether the books post it.",
+      inputSchema: { type: "object", properties: { name: { type: "string" }, market: MARKET, line: { type: "number", description: "A half-point line, e.g. 6.5" }, side: SIDE }, required: ["name", "market", "line"], additionalProperties: false } as const,
+      run: async (i) => {
+        const ids = parse(d, i.name).players;
+        return ids.length ? out(answerJson(answerPlayerLine(d, ids.slice(0, 1), i.market, i.side ?? "over", i.line))) : out({ error: "No player with that name has numbers this week." });
+      },
+    }),
+    betaTool({
+      name: "price_check", description: "Is a bet worth it at a given American price? Compares our chance with the chance the price implies and gives our fair price. Use for 'is X a good bet at -160', 'Gibbs at -330 worth it', or when the visitor lists their own slip prices. market defaults to anytime TD.",
+      inputSchema: { type: "object", properties: { name: { type: "string" }, price: { type: "integer", description: "American odds, e.g. -160 or 250" }, market: { type: "string", enum: ["td", ...markets] }, line: { type: "number" }, side: SIDE }, required: ["name", "price"], additionalProperties: false } as const,
+      run: async (i) => {
+        const ids = parse(d, i.name).players;
+        return ids.length ? out(answerJson(answerPriceCheck(d, ids.slice(0, 1), i.price, i.market ?? "td", i.side, i.line))) : out({ error: "No player with that name has numbers this week." });
+      },
+    }),
+    betaTool({
       name: "model_record", description: "How often past picks in each confidence tier actually hit on unseen weeks.",
       inputSchema: { type: "object", properties: {}, additionalProperties: false } as const,
       run: async () => out(answerJson(answerRecord(d))),
@@ -155,6 +171,9 @@ Rules:
 - Every chance, price, line, edge, projection and hit rate you mention must come from a tool result in this conversation. Never estimate, round up or add numbers of your own. If the tools do not cover something (weather, news, a market the site does not model), say so plainly.
 - Chances are validated model probabilities; "tier" and "tier_past_hit_rate" say how often past picks in that range hit. Prefer higher chances and, when prices are loaded, real edges. Mention injury notes.
 - Match the market to the question. Only use TD tools when the visitor asks about touchdowns or scorers. If they say "any prop", "any market", "safest pick" or name no market, use safest_any_market (or best_per_game with market "any" for one per game).
+- Suggested picks and parlays come only from confidence tiers that hit 50%+ on unseen weeks; the tools already apply that, so do not pad a list or parlay with weaker legs. If a tool returns fewer legs than asked, say why.
+- Prop chances already blend a 5,000-run simulation of each game where it proved more accurate. Mention it when asked how picks are made (explain_term "how picks are made").
+- When the visitor names a price ("at -160", "+250", a slip), call price_check for each player and say plainly whether it is value, fair or overpriced. When they name an exact line for a player, call player_line.
 - For "why" questions, call explain_pick and answer in plain words from its numbers: what supports the lean, what works against it, and how confident the model is. Do not invent factors the tool did not return.
 - You can answer a wide range of questions: picks by market, position, team, game or day; parlays; value vs the books; unders; hit rates and streaks; a player's alt-line ladder; defenses and matchups; game totals; projection leaders; due players; injuries; the model's record; and what the site's terms mean. Combine tools for multi-part questions (for example game_totals then best_per_game).
 - Call several tools when the question needs it (for example list_games, then best_per_game). Pass filters (position, teams, day) when the question names them.

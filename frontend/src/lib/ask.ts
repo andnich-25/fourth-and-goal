@@ -60,8 +60,8 @@ const MARKET_WORDS: [string, RegExp][] = [
   ["pass_tds", /(pass(ing)?|throw(ing)?)\s*(tds?|touchdowns?)/],
   ["interceptions", /\b(interceptions?|ints?|picks thrown|throw a pick)\b/],
   ["completions", /\bcompletions?\b/],
-  ["pass_attempts", /\b(pass(ing)? attempts?|attempts)\b/],
   ["carries", /\b(carries|rush(ing)? attempts?|rushes)\b/],
+  ["pass_attempts", /\b(pass(ing)? attempts?|attempts)\b/],
   ["receptions", /\b(receptions?|catches|recs)\b/],
 ];
 const NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, a: 1, single: 1,
@@ -71,8 +71,8 @@ const DAYS: Record<string, number> = { sunday: 0, monday: 1, tuesday: 2, wednesd
 /** Market label inside a sentence: lower case, but keep "TDs" as written. */
 const lc = (s: string) => s.toLowerCase().replace(/\btds?\b/g, (m) => m.toUpperCase().replace("S", "s"));
 
-export const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9+&' ]/g, " ")
-  .replace(/'/g, "").replace(/\s+/g, " ").trim();
+export const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9+&'. ]/g, " ")
+  .replace(/(?<!\d)\.|\.(?!\d)/g, " ").replace(/'/g, "").replace(/\s+/g, " ").trim(); // keeps decimal points (6.5), drops the rest
 
 /* ------------------------------------------------------------------ helpers */
 const dec = (american: number) => 1 + (american > 0 ? american / 100 : 100 / -american);
@@ -85,7 +85,7 @@ export const gameLabel = (gid: string) => { const g = gameTeams(gid); return `${
 const status = (r: RankingRow) => (r.features?.report_status ? String(r.features.report_status) : "");
 
 function withTier(d: AskData, p: Pick): Pick {
-  const t = tierFor(d.conf, p.kind, p.p); // the side is already chosen, so a prop under 50% gets no tier
+  const t = p.kind === "props" && p.p < 0.5 ? null : tierFor(d.conf, p.kind, p.p); // a prop side under 50% is the side we lean against: no tier
   return { ...p, tier: t?.tier, tierRate: t?.rate ?? null, tierData: t ?? undefined };
 }
 
@@ -274,7 +274,8 @@ export function answerProps(d: AskData, market: string, n: number, f: Filters, s
       .sort((a, b) => b.median - a.median).slice(0, n);
     return {
       title: `${label}: projections${describe(f) ? ` (${describe(f)})` : ""}`,
-      summary: "No sportsbook lines are loaded for this market yet, so here are the projected medians and 80% ranges. Over/under chances appear once lines arrive (the Saturday price pull), or type a line in the parlay builder.",
+      summary: d.feed.at ? `Our odds plan does not pull book lines for ${lc(label)}, so here are the projections (the middle outcome and the range he lands in 8 times out of 10). Ask about a specific line, like "Gibbs over 17.5 carries", for a chance.`
+        : "No sportsbook lines are loaded for this market yet, so here are the projections (the middle outcome and the range he lands in 8 times out of 10). Over/under chances appear once lines arrive (the Saturday price pull), or ask about a specific line.",
       projections: proj.map((r) => ({ name: r.player_name, team: r.team, pos: r.position, market, median: r.median, range: [r.q10, r.q90] })),
       notes: [], followups: ["Best value bets this week", "Top 5 TD scorers"],
     };
@@ -304,10 +305,11 @@ export function answerValue(d: AskData, n: number, f: Filters, markets?: string[
   };
 }
 
-export function answerParlay(d: AskData, legs: number, f: Filters, opts: { market?: string; value?: boolean; sameGame?: boolean } = {}): Answer {
+export function answerParlay(d: AskData, legs: number, f: Filters, opts: { market?: string; value?: boolean; sameGame?: boolean; side?: "over" | "under" } = {}): Answer {
   // No market named: the highest-chance legs from every market (anytime TD and the likelier side of each prop).
   const market = opts.market ?? "any";
-  let pool = market === "td" ? tdPool(d, f).slice(0, 40) : market === "any" ? anyPool(d, f).slice(0, 60) : propPool(d, market, f).filter((p) => p.p >= 0.5);
+  let pool = market === "td" ? tdPool(d, f).slice(0, 40) : market === "any" ? anyPool(d, f).slice(0, 60) : propPool(d, market, f, opts.side).filter((p) => p.p >= 0.5);
+  if (opts.side && market === "any") pool = Object.keys(d.props).flatMap((m) => propPool(d, m, f, opts.side)).filter((p) => p.p >= 0.5).sort((a, b) => b.p - a.p).slice(0, 80);
   if (!opts.value) pool = pool.filter((p) => isProven(d, p));
   if (new Set(pool.map((p) => p.game_id)).size === 1) opts = { ...opts, sameGame: true }; // a single-game slate (e.g. Thursday)
   if (opts.value) pool = pool.filter((p) => p.price != null && (p.edge as number) >= MIN_EDGE);
@@ -336,7 +338,8 @@ export function answerParlay(d: AskData, legs: number, f: Filters, opts: { marke
     summary: opts.value ? "Built only from legs that beat the best book price, combined for the highest expected return." :
       `The combination most likely to hit, from 40,000 simulated weeks${opts.sameGame ? "" : " (one leg per game)"}.`,
     picks: chosen, parlay: { joint: sim.joint, independent: sim.independent, price, legs: chosen.length },
-    notes: [price ? `Best prices multiplied: ${american(price)}, which implies ${pct(1 / price)} vs our ${pct(sim.joint)}.` : "Add prices in the parlay builder to compare against the books.",
+    notes: [...(chosen.length < legs && !opts.value ? [`Only ${chosen.length} leg${chosen.length === 1 ? "" : "s"} from confidence tiers that hit 50%+ on unseen weeks fit this ask${opts.sameGame ? "" : " (one per game)"}, so the parlay stops there rather than adding weaker legs.`] : []),
+      price ? `Best prices multiplied: ${american(price)}, which implies ${pct(1 / price)} vs our ${pct(sim.joint)}.` : "Add prices in the parlay builder to compare against the books.",
       ...(chosen.some((p) => p.lineSource === "usual") ? ["Some legs use the player's usual line because no book line is loaded for them; check the book's line before betting."] : []),
       ...(opts.value ? [] : [PROVEN_NOTE]), ...noteTier(chosen)],
     followups: ["Open this in the parlay builder", "Best value bets this week", "One TD scorer from each game"],
@@ -363,6 +366,11 @@ export function answerPlayer(d: AskData, ids: string[], only?: string): Answer {
         picks.push(o.p >= u.p ? o : u);
       } else projections.push({ name: pr.player_name, team: pr.team, pos: pr.position, market: m, median: pr.median, range: [pr.q10, pr.q90] });
     }
+    if (!name) {
+      // Not active this week (injured reserve, out, no role): name him and say why instead of "Player".
+      const any = Object.values(d.props).flatMap((x) => x.rows).find((x) => x.player_id === id) as (PropRow & { exclusion?: string | null }) | undefined;
+      if (any) { name = any.player_name; team = any.team; pos = any.position; if (any.exclusion) reasons.push(`${any.player_name} is not active this week: ${any.exclusion.replace(/^Roster status RES$/, "on injured reserve").replace(/^Roster status /, "roster status ")}.`); }
+    }
     if (r?.reasons?.length && (!only || only === "td")) reasons.push(`${r.player_name}: ${r.reasons.slice(0, 3).map((x) => x.text).join("; ")}.`);
     groups.push({ title: `${name ?? "Player"}${team ? ` (${pos}, ${team}${r?.opponent ? ` vs ${r.opponent}` : ""})` : ""}`, picks });
   }
@@ -370,7 +378,7 @@ export function answerPlayer(d: AskData, ids: string[], only?: string): Answer {
   return {
     title: groups.map((g) => g.title.split(" (")[0]).join(" vs "),
     summary: any ? (ids.length > 1 ? "Side by side: every validated chance we have for each player this week." : "Every validated chance we have for this player this week. For props, the more likely side at the book line is shown.")
-      : "No validated chances for this player this week (not eligible, injured, or not enough recent volume).",
+      : reasons.find((x) => x.includes("not active")) ?? "No validated chances for this player this week (not eligible, injured, or not enough recent volume).",
     groups, projections: projections.length ? projections : undefined, notes: [...reasons, ...noteTier(groups.flatMap((g) => g.picks)), ...priceNote(d)],
     followups: ["Top 5 TD scorers", "One TD scorer from each game"],
   };
@@ -410,6 +418,71 @@ function explainProp(d: AskData, r: PropRow, m: string, forceSide?: "over" | "un
   }
   if (e.team_implied_total != null) facts.push(`Game script: his team is projected for ${num1(e.team_implied_total)} points${e.opp_implied_total != null ? `, the opponent ${num1(e.opp_implied_total)}` : ""}.`);
   return { ...pick, reasons: pro, against: con, facts };
+}
+
+/** "Will Puka go over 6.5 receptions?": the named player's chance at that exact line, with his recent record against it. */
+export function answerPlayerLine(d: AskData, ids: string[], market: string, side: "over" | "under", line: number): Answer {
+  const label = d.props[market]?.label ?? market;
+  const picks: Pick[] = [];
+  const missing: string[] = [];
+  for (const id of ids) {
+    const r = d.props[market]?.rows.find((x) => x.player_id === id && x.dist);
+    if (!r) { missing.push(d.td.find((x) => x.player_id === id)?.player_name ?? Object.values(d.props).flatMap((x) => x.rows).find((x) => x.player_id === id)?.player_name ?? "That player"); continue; }
+    const pk = propPick(d, market, r, line, side);
+    const rec = (r.recent ?? []).slice(0, 8);
+    const hits = rec.filter((g) => (side === "over" ? g.value > line : g.value < line)).length;
+    const book = feedLine(d.feed, market, id);
+    picks.push({ ...pk, lineSource: book === line ? "book" : undefined, reasons: [
+      `Projection ${num1(r.median)}; 8 in 10 games should land between ${num1(r.q10)} and ${num1(r.q90)}`,
+      rec.length ? `${side === "over" ? "Over" : "Under"} ${line} in ${hits} of his last ${rec.length} games: ${rec.map((g) => num1(g.value)).join(", ")}` : "No recent games to compare",
+      book != null ? (book === line ? `This is the book line${pk.price != null ? ` (${fmtPrice(pk.price)} at ${pk.book})` : ""}` : `The book line is ${book}, so ${line} may not be offered`) : "No book line loaded for him in this market"] });
+  }
+  if (!picks.length) return { title: `No ${lc(label)} numbers for ${missing.join(" or ")}`, summary: `${missing.join(" and ")} ${missing.length > 1 ? "have" : "has"} no validated ${lc(label)} projection this week (not playing, too small a role, or this prop is not validated).`, notes: [], followups: [`Best ${lc(label)} picks`, "Top 5 TD scorers"] };
+  const one = picks[0];
+  return {
+    title: picks.length === 1 ? `${one.name} ${side} ${line} ${lc(label)}: ${pct(one.p)}` : `${side === "over" ? "Over" : "Under"} ${line} ${lc(label)}`,
+    summary: picks.length === 1 ? `Our model gives ${one.name} a ${pct(one.p)} chance to go ${side} ${line} ${lc(label)}${one.tier ? ` (${one.tier}: picks in that range hit ${pct(one.tierRate ?? 0)} on unseen weeks)` : ""}.`
+      + (one.p < 0.5 ? ` That makes the ${side === "over" ? "under" : "over"} the better side at ${pct(1 - one.p)}${(() => { const t = tierFor(d.conf, "props", 1 - one.p); return t ? ` (${t.tier})` : ""; })()}.` : "")
+      : "Each player's chance at that line, from the validated model.",
+    picks, notes: [...(missing.length ? [`No ${lc(label)} numbers for ${missing.join(", ")}.`] : []), ...noteTier(picks)],
+    followups: [`${one.name} ${lc(label)} at every line`, `Why ${one.name}?`, "Safest 3-leg parlay"],
+  };
+}
+
+/** "Is Swift a good bet at -160?": our chance against the chance that price implies. */
+export function answerPriceCheck(d: AskData, ids: string[], price: number, market: string | undefined, side?: "over" | "under", line?: number): Answer {
+  const implied = 1 / dec(price);
+  const picks: Pick[] = [];
+  for (const id of ids) {
+    let pk: Pick | null = null;
+    if (!market || market === "td") {
+      const r = d.td.find((x) => x.player_id === id && x.p_model != null);
+      if (r) pk = tdPick(d, r);
+    } else {
+      const r = d.props[market]?.rows.find((x) => x.player_id === id && x.dist);
+      if (r) {
+        const ln = line ?? feedLine(d.feed, market, id) ?? estimatedLine(r, market).line;
+        const over = pOver(r.dist as PropDist, ln);
+        pk = propPick(d, market, r, ln, side ?? (over >= 0.5 ? "over" : "under"));
+      }
+    }
+    if (!pk) continue;
+    const edge = pk.p - implied;
+    const verdict = edge >= MIN_EDGE ? `Value: our ${pct(pk.p)} beats the ${pct(implied)} that ${fmtPrice(price)} implies (+${Math.round(edge * 100)} points)`
+      : edge > -MIN_EDGE ? `Fair price: ${fmtPrice(price)} implies ${pct(implied)} and we have ${pct(pk.p)}, so there is no real edge either way`
+        : `Overpriced: ${fmtPrice(price)} implies ${pct(implied)} but we have ${pct(pk.p)} (${Math.round(edge * 100)} points)`;
+    const fair = pk.p >= 0.5 ? Math.round(-100 * pk.p / (1 - pk.p)) : Math.round(100 * (1 - pk.p) / pk.p);
+    picks.push({ ...pk, reasons: [verdict, `Our fair price: ${fmtPrice(fair)}. Anything longer than that is a better bet than this one`,
+      ...(pk.price != null && pk.price !== price ? [`Best price we have loaded: ${fmtPrice(pk.price)} (${pk.book})`] : [])] });
+  }
+  if (!picks.length) return { title: "No chance to compare", summary: "That player has no validated chance for this bet this week.", notes: [], followups: ["Top 5 TD scorers"] };
+  const one = picks[0];
+  const e = one.p - implied;
+  return {
+    title: picks.length === 1 ? `${one.name} ${one.label} at ${fmtPrice(price)}: ${e >= MIN_EDGE ? "value" : e > -MIN_EDGE ? "fair price" : "overpriced"}` : `Price check at ${fmtPrice(price)}`,
+    summary: `${fmtPrice(price)} implies a ${pct(implied)} chance. ${picks.map((x) => `${x.name}: ${pct(x.p)}`).join(", ")}. A bet is worth it when our chance is at least ${Math.round(MIN_EDGE * 100)} points above the implied chance.`,
+    picks, notes: noteTier(picks), followups: ["Best value bets this week", `Why ${one.name}?`, "Bets to avoid"],
+  };
 }
 
 export function answerWhy(d: AskData, ids: string[], market?: string, side?: "over" | "under"): Answer {
@@ -643,7 +716,7 @@ export const PLAYABLE_NOTE = "Only lines a book would realistically offer are us
 /** Props a player has cleared in (nearly) every recent game, only at lines a sportsbook actually posts for him: the
  *  highest posted line he cleared at the threshold (lowest for unders), per market. A player or market with no posted
  *  line is left out, so nothing is listed that can't be bet. */
-export function answerHitRates(d: AskData, n: number, f: Filters, o: { threshold?: number; window?: number; side?: "over" | "under"; markets?: string[] } = {}): Answer {
+export function answerHitRates(d: AskData, n: number, f: Filters, o: { threshold?: number; window?: number; side?: "over" | "under"; markets?: string[]; fallback?: boolean } = {}): Answer {
   const threshold = o.threshold ?? 1, window = o.window ?? 8, sides = o.side ? [o.side] : (["over"] as const);
   const all: Pick[] = [];
   let anyAlt = false;
@@ -669,7 +742,15 @@ export function answerHitRates(d: AskData, n: number, f: Filters, o: { threshold
   const picks = all.sort((a, b) => b.p - a.p);
   const label = `${Math.round(threshold * 100)}%`;
   if (!d.feed.at) return { title: "Hit rates need the books' lines", summary: "Only props the sportsbooks actually post are listed, and no book lines are loaded for this week yet. They are pulled Saturday morning.", notes: [], followups: ["Who is due for a TD?", "Safest pick, any prop"] };
-  if (!picks.length) return none(d, `No posted props at a ${label} hit rate over the last ${window} games`, f);
+  if (!picks.length) {
+    // Nothing perfect: step down to the best record any posted prop has, so the answer is still useful.
+    const lower = o.fallback ? [0.9, 0.8, 0.75].find((t) => t < threshold && answerHitRates(d, 1, f, { ...o, threshold: t, fallback: false }).picks?.length) : undefined;
+    if (lower != null) {
+      const a = answerHitRates(d, n, f, { ...o, threshold: lower, fallback: false });
+      return { ...a, notes: [`No posted prop hit at ${label} over his last ${window} games, so these are the best records (${Math.round(lower * 100)}%+).`, ...a.notes] };
+    }
+    return none(d, `No posted props at a ${label} hit rate over the last ${window} games`, f);
+  }
   return {
     title: `Props at a ${label} hit rate (last ${window} games)${describe(f) ? ` (${describe(f)})` : ""}`,
     summary: `${picks.length} props the books are posting this week where he cleared the line in at least ${label} of his last ${window} games${anyAlt ? ", at the highest posted line that holds" : ""}. Highest model chance first: a perfect recent record does not mean a sure thing, so the model's chance for this week is shown beside each.`,
@@ -770,8 +851,12 @@ const GLOSSARY: [RegExp, string, string][] = [
   [/\b(score out of 10|out of 10|confidence score)\b/, "Scores out of 10", "On the props page each player gets an under and an over score: the model's chance of that side times 10. They always add to 10, and the bigger one is the lean."],
   [/\b(walk.?forward|backtest|tested|validated)\b/, "Walk-forward testing", "Each past week was predicted using only games before it, then graded. A model goes live only if it beats simple baselines on those unseen weeks and its chances match how often things happened."],
   [/\b(hit rate)\b/, "Hit rate", "Hit rate is how often he cleared a line in his recent games. It describes the past; the model's chance is the forecast for this week, which also weighs the matchup, role and game script."],
-  [/\b(simulat|correlat|parlay odds)\b/, "Simulations", "Parlays are simulated 40,000 times. Legs in the same game move together the way they have historically (a QB's yards and his receiver's catches), because that tested better than treating them as independent."],
-  [/\b(projection|median|range)\b/, "Projection and range", "The projection is the middle outcome: half his outcomes land above it, half below. The 80% range is where he lands 8 times out of 10."],
+  [/\b(how do you (make|pick|choose|decide|come up|get|build)|how does (the|your|it) (model|site|work)|how are (picks|chances) (made|picked)|methodology|where do (the|your) (picks|numbers) come)\b/, "How picks are made",
+    "Every chance comes from models trained on every game since 2018, with the last two seasons counting most. They use each player's role (snaps, targets, carries, red-zone work), recent form, the opponent's defense against his position, the betting line's implied team points, and whether he is due. Prop chances also blend in a 5,000-run simulation of each game where that proved more accurate. Every model was tested week by week on games it had never seen, and only picks from tiers that hit 50%+ in that testing are suggested."],
+  [/\b(5 ?000|five thousand|game sim|simulate the game|simulation of)\b/, "The 5,000-game simulation",
+    "Each game is played out 5,000 times: team pass and run volume, who gets the targets and carries, catches and yards against this defense, with a quarterback's yards equal to his receivers' total. Where that beat the model alone on unseen weeks (receptions, receiving yards, rushing yards, carries, rush + receiving yards), the two are blended."],
+  [/\b(simulat\w*|correlat\w*|parlay odds)\b/, "Simulations", "Two kinds. Every game is played out 5,000 times (team volume, who gets the targets and carries, yards against this defense), and that simulation is blended into prop chances where it proved more accurate on unseen weeks. Parlays are then simulated 40,000 times. Legs in the same game move together the way they have historically (a QB's yards and his receiver's catches), because that tested better than treating them as independent."],
+  [/\b(projection|median|range)\b/, "Projection and range", "The projection is the middle outcome: half his outcomes land above it, half below. The range is where he lands 8 times out of 10."],
 ];
 export function answerGlossary(q: string): Answer | null {
   const hits = GLOSSARY.filter(([re]) => re.test(q));
@@ -797,7 +882,7 @@ export const EXAMPLES = [
   "How accurate is the model?",
 ];
 
-export type Parsed = { intent: string; n?: number; market?: string; anyMarket?: boolean; noTd?: boolean; side?: "over" | "under"; line?: number; filters: Filters; players: string[]; value: boolean; sameGame: boolean; ambiguous?: string[] };
+export type Parsed = { intent: string; n?: number; market?: string; anyMarket?: boolean; noTd?: boolean; side?: "over" | "under"; line?: number; filters: Filters; players: string[]; value: boolean; sameGame: boolean; ambiguous?: string[]; price?: number; unknown?: string };
 
 // Last names that are also everyday words only count when capitalised ("Will Swift score?", not "likely to score").
 const COMMON = new Set(["likely", "love", "will", "hill", "white", "young", "brown", "rice", "cook", "best", "king", "price", "golden", "hunt",
@@ -806,21 +891,43 @@ const COMMON = new Set(["likely", "love", "will", "hill", "white", "young", "bro
   "wilson", "lamb", "mann", "field", "fields", "pierce", "worthy", "london", "nation", "god", "goff", "able", "bowers", "warren", "washington",
   "cash", "money", "lock", "locks", "legs", "score", "scorer", "pick", "picks", "game", "week", "over", "under", "value", "parlay"]);
 
+// Nicknames people type, mapped to the full name.
+const NICKNAMES: [RegExp, string][] = [[/\bcmc\b/, "christian mccaffrey"], [/\bjsn\b/, "jaxon smith njigba"], [/\b(arsb|amon ra|sun god)\b/, "amon ra st brown"],
+  [/\bkw3\b/, "kenneth walker"], [/\bmhj\b/, "marvin harrison"], [/\bbtj\b/, "brian thomas"], [/\bjjm\b/, "jj mccarthy"], [/\bhollywood\b/, "marquise brown"],
+  [/\bbig dog\b/, "derrick henry"], [/\bking henry\b/, "derrick henry"], [/\btk\b/, "travis kelce"]];
+// Words that can sit right before a last name without being a different first name ("Will Swift score", "is Henry a lock").
+const LEADERS = new Set(["will", "is", "does", "can", "should", "why", "how", "what", "who", "and", "or", "vs", "versus", "compare", "explain", "about", "on", "for",
+  "with", "than", "like", "think", "take", "bet", "hammer", "fade", "the", "a", "an", "of", "to", "has", "have", "did", "do", "if", "but", "rate", "trust", "give", "me", "rams", "lions"]);
+
 function findPlayers(d: AskData, q: string, raw = q): { ids: string[]; ambiguous: string[] } {
+  for (const [re, full] of NICKNAMES) if (re.test(q)) q = q.replace(re, full);
   const caps = new Set(raw.split(/[^A-Za-z'.-]+/).filter((w) => /^[A-Z]/.test(w)).map((w) => norm(w)));
+  const qw = q.trim().split(" ");
   const names = new Map<string, string>();
   for (const r of d.td) names.set(r.player_id, r.player_name);
   for (const { rows } of Object.values(d.props)) for (const r of rows) if (!names.has(r.player_id)) names.set(r.player_id, r.player_name);
   const words = new Set(q.split(" "));
-  const full: string[] = [], byLast = new Map<string, string[]>();
+  const full: string[] = [], byLast = new Map<string, string[]>(), byFirst = new Map<string, string[]>();
   for (const [id, name] of names) {
     const n = norm(name).replace(/\b(jr|sr|ii|iii|iv)\b/g, "").trim();
     if (n.length > 4 && q.includes(n)) { full.push(id); continue; }
     const parts = n.split(" ");
-    const last = parts[parts.length - 1];
-    if (last.length >= 4 && words.has(last) && !TEAMS[last] && (!COMMON.has(last) || caps.has(last))) byLast.set(last, [...(byLast.get(last) ?? []), id]);
+    const last = parts[parts.length - 1], first = parts[0];
+    if (last.length >= 4 && words.has(last) && !TEAMS[last] && (!COMMON.has(last) || caps.has(last))) {
+      // "Josh Allen" names someone else, not Braelon Allen: a capitalised word right before the last name has to be his first name.
+      const before = qw[qw.indexOf(last) - 1];
+      if (!before || parts.includes(before) || LEADERS.has(before) || !caps.has(before) || TEAMS[before]) byLast.set(last, [...(byLast.get(last) ?? []), id]);
+    }
+    if (parts.length > 1 && first.length >= 4 && words.has(first) && !TEAMS[first] && !COMMON.has(first) && !LEADERS.has(first)) byFirst.set(first, [...(byFirst.get(first) ?? []), id]);
   }
-  if (full.length) return { ids: full, ambiguous: [] };
+  if (full.length) {
+    // "Kyren Williams or Bijan": keep the full-name match and add anyone else named, ignoring words inside the full names.
+    const used = new Set(full.flatMap((id) => norm(names.get(id) as string).split(" ")));
+    const extra = [...byLast.entries(), ...byFirst.entries()].filter(([w, list]) => list.length === 1 && !used.has(w) && !full.includes(list[0])).map(([, list]) => list[0]);
+    return { ids: [...new Set([...full, ...extra])], ambiguous: [] };
+  }
+  // A first name only counts when one player has it ("Saquon", "Puka", "Bijan") and the word was not already a last name.
+  for (const [first, list] of byFirst) if (list.length === 1 && !byLast.has(first) && ![...byLast.values()].flat().includes(list[0])) byLast.set(`first:${first}`, list);
   const ids: string[] = [], ambiguous: string[] = [];
   for (const [, list] of byLast) {
     if (list.length === 1) ids.push(list[0]);
@@ -852,10 +959,14 @@ export function parse(d: AskData, raw: string): Parsed {
   const td = /\b(tds?|touchdowns?|score|scores|scorer|scorers|scoring|anytime|find the end ?zone|endzone|end zone)\b/.test(q);
   if (td && market && !["pass_tds"].includes(market) && !/(yards|yds|receptions|catches|carries|completions|attempts)/.test(q)) market = undefined;
   const side = /\b(unders?|less than|fewer|stay under)\b/.test(q) ? "under" : /\b(overs?|more than|at least|go over|exceed)\b/.test(q) ? "over" : undefined;
+  // "throw 2 touchdowns", "2+ passing TDs": a passing-TD line.
+  const ptd = q.match(/\b(?:throws?|throwing|toss(?:es)?)\s+(?:for\s+)?(\d|two|three|four)\+?\s+(?:or more\s+)?(?:tds?|touchdowns?|tddds?)\b/);
+  if (ptd) market = "pass_tds";
 
   // "250 passing yards", "throw for 300", "100+ rushing yards", "6+ catches", "over 59.5": a line, not a count.
   let line: number | undefined;
   const lm = q.match(/\b(?:over|under|at least|more than|fewer than|less than|for|clear|hit|reach|get)\s+(\d+(?:\.\d)?)\b/) ?? q.match(/\b(\d+(?:\.\d)?)\s*(?:\+\s*)?(?:or more\s+)?(?:pass(ing)?|rush(ing)?|rec(eiving)?|receptions?|catches|carries|completions|yards|yds)/);
+  if (ptd && !lm) line = (NUM[ptd[1]] ?? Number(ptd[1])) - 0.5;
   if (lm) {
     const v = Number(lm[1]);
     line = Number.isInteger(v) ? v - 0.5 : v;
@@ -865,7 +976,7 @@ export function parse(d: AskData, raw: string): Parsed {
   }
   let n: number | undefined;
   // "from all 14 games" sizes the slate, not the answer.
-  const qn = q.replace(lm?.[0] ?? "@@", " ").replace(/\b(all |the |of |these |this weeks )?(\d{1,2}|[a-z]+teen|ten|eleven|twelve) (games|matchups)\b/g, " ");
+  const qn = q.replace(lm?.[0] ?? "@@", " ").replace(ptd?.[0] ?? "@@", " ").replace(/[+-]\d{3,4}\b/g, " ").replace(/\b(all |the |of |these |this weeks )?(\d{1,2}|[a-z]+teen|ten|eleven|twelve) (games|matchups)\b/g, " ");
   const dm = qn.match(/\b(\d{1,2})\b/);
   if (dm) n = Number(dm[1]);
   else for (const [w, v] of Object.entries(NUM)) if (new RegExp(`\\b${w}\\b(?! (each|every|per)\\b)`).test(qn) && w !== "a") { n = v; break; }
@@ -873,26 +984,42 @@ export function parse(d: AskData, raw: string): Parsed {
   const value = /\b(value|edges?|ev|plus ev|\+ev|beat(ing)? the books?|mispriced|soft lines?|overlay|bang for)\b/.test(q);
   const sameGame = /\b(same ?game|sgp|in this game|in the game)\b/.test(q) || (teams.size > 0 && /\bparlay\b/.test(q));
   const pl = findPlayers(d, q, raw);
+  // A capitalised "First Last" that matches nobody playing this week (a bye, an injury, a typo): say so instead of guessing.
+  let unknown: string | undefined;
+  if (!pl.ids.length) {
+    const GENERIC = /^(night|football|game|games|parlay|picks?|props?|bets?|week|td|tds|touchdown|yards|receptions|over|under|line|lines|hit|rate|value|sunday|monday|thursday|saturday|bowl|day|leg|legs|lock|locks|scorer|scorers)$/;
+    for (const m of raw.matchAll(/\b([A-Z][a-z'.]+(?:-[A-Z][a-z]+)?)\s+([A-Z][a-z'.]+(?:-[A-Z][a-z]+)?)\b/g)) {
+      const a = norm(m[1]), b = norm(m[2]);
+      if (LEADERS.has(a) || TEAMS[a] || TEAMS[b] || GENERIC.test(a) || GENERIC.test(b) || DAYS[a] != null || COMMON.has(a)) continue;
+      unknown = `${m[1]} ${m[2]}`; break;
+    }
+  }
   // "prop" without a named stat means any market, and so does a generic "safest/best pick" with no TD wording.
+  // Generic asks ("best bets", "your locks", "who should I bet on", "Thursday picks") draw from every market, like the home page.
   const anyM = anyMarket || (!td && !market && (/\bprops?\b/.test(q)
-    || (/\b(safest|surest|most likely|best|strongest|highest|top rated|highest rated|most confident)\b/.test(q) && /\b(picks?|bets?|plays?|legs?)\b/.test(q))));
-  const noTd = /\b(no|not|non|without|excluding|except|besides|other than) (an? )?(anytime )?(tds?|touchdowns?)\b/.test(q);
-  const base = { n, market, anyMarket: anyM || noTd, noTd, side: line != null && !side ? "over" as const : side, line, filters, players: pl.ids, value, sameGame, ambiguous: pl.ambiguous } as const;
+    || /\b(picks?|bets?|plays?|legs?|locks?|bet on|recommend(ations?)?)\b/.test(q) || /\bwho should i\b/.test(q)));
+  const noTd = /\b(no|not|non|without|excluding|except|besides|other than) (an? )?(anytime )?(tds?|touchdowns?)\b/.test(q) || (!td && /\bprops?\b/.test(q));
+  // "Swift at -160", "is +250 worth it": a price to check against our chance.
+  const priceM = raw.match(/(?:^|[\s(@])([+-]\d{3,4})\b/);
+  const price = priceM ? Number(priceM[1]) : undefined;
+  const base = { n, market, anyMarket: anyM || noTd, noTd, side: line != null && !side ? "over" as const : side, line, filters, players: pl.ids, value, sameGame, ambiguous: pl.ambiguous, price, unknown } as const;
 
   if (/\b(what can you|help me|how do i use|what do you know)\b/.test(q)) return { ...base, intent: "help" };
-  if (!pl.ids.length && /\b(what (does|do|is|are)|whats|define|meaning|mean)\b/.test(q) && answerGlossary(q)) return { ...base, intent: "glossary" };
+  if ((!pl.ids.length || /\b(mean|meaning|define)\b/.test(q)) && !/\b(best|top|safest|give me|show me)\b/.test(q) && /\b(what (does|do|is|are)|whats|define|meaning|mean|how do you|how does (the|your|it)|how are)\b/.test(q) && answerGlossary(q)) return { ...base, intent: "glossary" };
+  if (pl.ids.length && price != null) return { ...base, intent: "price" };
+  if (pl.ids.length && line != null && market) return { ...base, intent: "playerline" };
   if (pl.ids.length && /\b(alt(ernate)? lines?|ladder|every line|all (the )?lines|how often|hit rates?|how many times)\b/.test(q)) return { ...base, intent: "ladder" };
-  if (/\b\d{2,3} ?(%|percent)/.test(raw.toLowerCase()) || /\bhit rates?\b|\bperfect (record|hit)|\bnever missed|\bhasnt missed|\b(cleared|hit) (it )?(in )?every (single )?(game|time)|\bhot streak|\bon fire\b|\bstreaks?\b|\bevery (single )?game (this|last)/.test(q)) return { ...base, intent: "hitrate" };
+  if (/\b\d{2,3} ?(%|percent)/.test(raw.toLowerCase()) || /\bhit rates?\b|\bperfect (record|hit)|\bnever missed|\bhasnt missed|\b(cleared|hit|gone over|went over) (it |the line )?(in )?every (single )?(game|time|week)|\bhot streak|\bon fire\b|\bstreaks?\b|\bevery (single )?game (this|last)/.test(q)) return { ...base, intent: "hitrate" };
   if (!pl.ids.length && /\b(defen[sc]es?|matchups?|d vs|against the pass|against the run)\b/.test(q) && /\b(worst|best|toughest|easiest|weakest|strongest|allow|allows|allowed|most|fewest|good|bad|soft|stingiest|hardest)\b/.test(q)) return { ...base, intent: "defense" };
   if (/\b(highest|most|lowest|fewest|least) (scoring|points|projected (total|points))|\bshootouts?\b|\bgame totals?\b|\bprojected totals?\b|\bwhich games? .*(score|points|total)|\bhighest total|\blowest total/.test(q)) return { ...base, intent: "games" };
   if (market && !pl.ids.length && /\b(most|highest|lowest|fewest|leaders?|projected|projections?)\b/.test(q) && !/\b(over|under|chance|likely|safest|parlay|value)\b/.test(q) && line == null) return { ...base, intent: "leaders" };
   if (pl.ids.length && /\b(why|explain|reasons?|reasoning|how come|what makes|what is behind|whats behind|justify|based on what)\b/.test(q)) return { ...base, intent: "why" };
-  if (/\b(accura|track record|hit rate|how good is (the|your) model|trust (the|your)|calibrat|how often .* (hit|right))/.test(q)) return { ...base, intent: "record" };
-  if (/\b(injur|questionable|doubtful|hurt|out this week|inactive)/.test(q) && !/\b(parlay|best|top)\b/.test(q)) return { ...base, intent: "injuries" };
+  if (/\b(accura|track record|record|hit rate|how good is (the|your) model|trust (the|your|this|it|you|these)|can i trust|reliable|calibrat|how often .* (hit|right)|win rate|success rate|guarantee\w*|sure thing|locks? really)/.test(q)) return { ...base, intent: "record" };
+  if (/\b(injur\w*|questionable|doubtful|hurt|out this week|inactive)\b/.test(q) && !/\b(parlay|best|top)\b/.test(q)) return { ...base, intent: "injuries" };
   if (/\b(avoid|fade|stay away|overpriced|overrated|traps?|worst bets?|bad bets?)\b/.test(q)) return { ...base, intent: "avoid" };
   if (/\b(each|every|per|all) (game|matchup|contest)s?\b|\bfrom every\b|\bgame by game\b|\beach of the games\b/.test(q)) return { ...base, intent: "pergame" };
   if (/\b(parlay|parlays|legs?|slip|accumulator|multi)\b/.test(q)) return { ...base, intent: "parlay" };
-  if (/\b(fall short|come up short|struggle|won'?t (hit|reach|get)|held (in check|under)|shut ?down|bust|unders?)\b/.test(q) && !/\b(parlay|each|every)\b/.test(q)) return { ...base, intent: "unders" };
+  if (/\b(fall short|come up short|struggle|won'?t (hit|reach|get)|held (in check|under)|shut ?down|bust|busts|busting|unders?)\b/.test(q) && !/\b(parlay|each|every)\b/.test(q)) return { ...base, intent: "unders" };
   if ((anyM || noTd) && !/\b(parlay|parlays|value|unders?|fall short)\b/.test(q) && !pl.ids.length) return { ...base, intent: "any" };
   if (/\b(longshots?|long shots?|sleepers?|dark ?horse|big payout|plus money|underdogs? to score|lottery)\b/.test(q)) return { ...base, intent: "sleepers" };
   if (pl.ids.length && !/\b(top|best|safest|most likely|highest)\b/.test(q) && line == null) return { ...base, intent: "player" };
@@ -910,11 +1037,17 @@ export function answer(d: AskData, raw: string): Answer {
   const p = parse(d, raw);
   const f = p.filters;
   let a: Answer;
+  if (p.unknown && ["player", "props", "top", "why", "ladder", "any", "help"].includes(p.intent)) {
+    return { title: `No numbers for ${p.unknown} this week`, summary: `${p.unknown} has no projection this week. He may be on a bye, injured or inactive, or the name may be spelled differently. Try his last name alone.`,
+      notes: [], followups: ["Top 5 TD scorers", "Safest pick, any prop", "Injury report"] };
+  }
   switch (p.intent) {
+    case "price": a = answerPriceCheck(d, p.players.slice(0, 3), p.price as number, p.market ?? (/\b(td|touchdown|score|scorer|anytime)/.test(norm(raw)) || !p.line ? "td" : undefined), p.side, p.line); break;
+    case "playerline": a = answerPlayerLine(d, p.players.slice(0, 3), p.market as string, p.side ?? "over", p.line as number); break;
     case "record": a = answerRecord(d); break;
     case "injuries": a = answerInjuries(d, f); break;
     case "pergame": a = answerPerGame(d, p.market ?? (p.noTd ? "any-props" : p.anyMarket ? "any" : "td"), f); break;
-    case "parlay": a = answerParlay(d, Math.min(Math.max(p.n ?? 3, 2), 8), f, { market: p.market ?? (/\b(tds?|touchdowns?|scor|anytime)/.test(norm(raw)) && !p.anyMarket ? "td" : "any"), value: p.value, sameGame: p.sameGame }); break;
+    case "parlay": a = answerParlay(d, Math.min(Math.max(p.n ?? 3, 2), 8), f, { market: p.market ?? (/\b(tds?|touchdowns?|scor|anytime)/.test(norm(raw)) && !p.anyMarket ? "td" : "any"), value: p.value, sameGame: p.sameGame, side: p.side }); break;
     case "sleepers": a = answerSleepers(d, p.n ?? 6, f); break;
     case "due": a = answerDue(d, p.n ?? 8, f); break;
     case "glossary": a = answerGlossary(norm(raw)) as Answer; break;
@@ -924,7 +1057,8 @@ export function answer(d: AskData, raw: string): Answer {
       const hot = /\b(hot|streak|on fire)\b/.test(qq);
       const pctm = raw.toLowerCase().match(/\b(\d{2,3}) ?(?:%|percent)/);
       const win = qq.match(/\blast (\d{1,2})\b/);
-      a = answerHitRates(d, p.n ?? 15, f, { threshold: pctm ? Math.min(1, Number(pctm[1]) / 100) : 1, window: win ? Math.min(16, Number(win[1])) : hot ? 5 : 8,
+      const season = /\b(this season|all season|every game|every week)\b/.test(qq);
+      a = answerHitRates(d, p.n ?? 15, f, { threshold: pctm ? Math.min(1, Number(pctm[1]) / 100) : 1, window: win ? Math.min(16, Number(win[1])) : hot ? 5 : season ? 16 : 8, fallback: !pctm,
         side: p.side ?? (/\bunders?\b/.test(qq) ? "under" : undefined), markets: p.market ? [p.market] : undefined });
       break;
     }

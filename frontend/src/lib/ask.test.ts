@@ -179,4 +179,24 @@ describe("ask parser", () => {
     expect(a.picks?.every((p) => p.p >= 0.5)).toBe(true);
     expect(a.picks?.map((p) => p.name)).toEqual(["Jahmyr Gibbs", "D'Andre Swift"]);
   });
+
+  it("reads half-point lines, passing-TD counts, nicknames and prices", () => {
+    expect(parse(d, "passing touchdowns over 1.5").line).toBe(1.5);
+    expect(parse(d, "Puka over 6.5 receptions").line).toBe(6.5);
+    const two = parse(d, "who throws 2 touchdowns");
+    expect([two.market, two.line]).toEqual(["pass_tds", 1.5]);
+    expect(parse(d, "rush attempts").market).toBe("carries");
+    expect(parse(d, "Is Swift a good bet at -160").intent).toBe("price");
+    const a = answer(d, "Is Swift a good bet at -160");
+    expect(a.title).toContain("overpriced"); // 54% vs 62% implied
+    expect(answer(d, "Gibbs at +150").title).toContain("value"); // 63% vs 40% implied
+  });
+
+  it("does not confuse names or words", () => {
+    expect(parse(d, "Jalen Hurts").intent).not.toBe("injuries");
+    expect(answer(d, "Josh Allen passing yards").title).toContain("No numbers for Josh Allen");
+    expect(parse(d, "Kyren or Gibbs").players.length).toBeGreaterThan(0);
+    expect(parse(d, "best bets this week").intent).toBe("any");
+    expect(parse(d, "what does Strong mean").intent).toBe("glossary");
+  });
 });
