@@ -64,23 +64,44 @@ function SportSwitch({ nba }: { nba: boolean }) {
 
 type Health = { data_loaded: boolean; ready: boolean; calibrated: boolean };
 
-export function Logo({ compact = false }: { compact?: boolean }) {
+export function Logo({ compact = false, nba = false }: { compact?: boolean; nba?: boolean }) {
   return (
     <div className="flex items-center gap-2.5">
       <svg viewBox="0 0 32 32" className="h-8 w-8 shrink-0" aria-hidden>
         <rect width="32" height="32" rx="8" className="fill-raised" />
-        {/* Lab flask: neck, body and the liquid line */}
-        <path d="M13 7h6M14 7v6.5L8.6 22.8A2 2 0 0 0 10.3 26h11.4a2 2 0 0 0 1.7-3.2L18 13.5V7" className="stroke-accent" strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M11.2 19.5h9.6l2 3.4a1 1 0 0 1-.9 1.6H10.1a1 1 0 0 1-.9-1.6z" className="fill-accent" />
+        {nba ? (
+          /* Basketball: outline and seams */
+          <g className="stroke-accent" strokeWidth="2" fill="none" strokeLinecap="round">
+            <circle cx="16" cy="16" r="9.5" />
+            <path d="M16 6.5v19M6.5 16h19M9.6 9c2.9 3.8 2.9 10.2 0 14M22.4 9c-2.9 3.8-2.9 10.2 0 14" />
+          </g>
+        ) : (
+          <>
+            {/* Lab flask: neck, body and the liquid line */}
+            <path d="M13 7h6M14 7v6.5L8.6 22.8A2 2 0 0 0 10.3 26h11.4a2 2 0 0 0 1.7-3.2L18 13.5V7" className="stroke-accent" strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M11.2 19.5h9.6l2 3.4a1 1 0 0 1-.9 1.6H10.1a1 1 0 0 1-.9-1.6z" className="fill-accent" />
+          </>
+        )}
       </svg>
       {!compact && (
         <div className="leading-tight">
-          <div className="font-display text-[15px] font-bold tracking-tight">The Lab</div>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">Props · Sims · Data</div>
+          <div className="font-display text-[15px] font-bold tracking-tight">The Lab{nba && <span className="text-accent"> NBA</span>}</div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">{nba ? "Hoops · Props · Sims" : "Props · Sims · Data"}</div>
         </div>
       )}
     </div>
   );
+}
+
+/** The NBA side is styled as its own site: palette (index.css), favicon and tab title follow the sport. */
+function useSportTheme(nba: boolean) {
+  React.useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (nba) root.dataset.sport = "nba"; else delete root.dataset.sport;
+    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (icon) icon.href = `${import.meta.env.BASE_URL}${nba ? "favicon-nba.svg" : "favicon.svg"}`;
+    document.title = nba ? "The Lab NBA" : "The Lab";
+  }, [nba]);
 }
 
 function SeasonWeekPicker() {
@@ -139,6 +160,7 @@ export function Layout() {
   const loc = useLocation();
   React.useEffect(() => setOpen(false), [loc.pathname]);
   const nba = loc.pathname === "/nba" || loc.pathname.startsWith("/nba/");
+  useSportTheme(nba);
   const sections = nba ? NBA_SECTIONS : SECTIONS;
   const mobile = nba ? NBA_MOBILE : MOBILE;
   const link = (n: NavItem) => (
@@ -164,7 +186,7 @@ export function Layout() {
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-surface focus:px-3 focus:py-2">Skip to content</a>
       {/* Desktop sidebar */}
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-line bg-surface/40 px-3 py-4 lg:flex">
-        <div className="px-2 pb-6"><Logo /></div>
+        <div className="px-2 pb-6"><Logo nba={nba} /></div>
         <nav aria-label="Primary" className="flex flex-1 flex-col gap-0.5"><Sections sections={sections} link={link} /></nav>
         <div className="mt-4 rounded-lg border border-line p-3 text-[11px] leading-relaxed text-muted">
           <Activity className="mb-1 h-3.5 w-3.5 text-accent" aria-hidden />
@@ -176,7 +198,7 @@ export function Layout() {
         <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
           <div className="absolute inset-0 bg-black/50" onClick={() => setOpen(false)} />
           <nav className="absolute left-0 top-0 flex h-full w-64 flex-col gap-0.5 bg-surface p-3">
-            <div className="mb-4 flex items-center justify-between px-2"><Logo /><button aria-label="Close menu" onClick={() => setOpen(false)}><X className="h-5 w-5" /></button></div>
+            <div className="mb-4 flex items-center justify-between px-2"><Logo nba={nba} /><button aria-label="Close menu" onClick={() => setOpen(false)}><X className="h-5 w-5" /></button></div>
             <Sections sections={sections} link={link} />
           </nav>
         </div>
@@ -184,7 +206,7 @@ export function Layout() {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex h-14 items-center gap-2 sm:gap-3 border-b border-line bg-bg/85 px-3 backdrop-blur sm:px-6">
           <button className="lg:hidden" aria-label="Open menu" onClick={() => setOpen(true)}><Menu className="h-5 w-5" /></button>
-          <div className="lg:hidden"><Logo compact /></div>
+          <div className="lg:hidden"><Logo compact nba={nba} /></div>
           <SportSwitch nba={nba} />
           <div className="flex-1" />
           {!nba && <SeasonWeekPicker />}

@@ -13,6 +13,7 @@
         const t = localStorage.getItem("fg-theme") || "dark";
         const dark = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.classList.toggle("dark", dark);
+        if (/^#?\/nba(\/|$|\?)/.test(location.hash) || /^\/nba(\/|$)/.test(location.pathname)) document.documentElement.dataset.sport = "nba";
       } catch (e) {}
     </script>
   </head>
