@@ -16,6 +16,8 @@ export const NBA_MARKETS: { market: string; label: string; short: string }[] = [
 ];
 export const marketLabel = (m: string) => NBA_MARKETS.find((x) => x.market === m)?.label ?? m;
 export const EDGE_MIN = 0.03;
+/** Picks and records skip lines under 1.5 (an "under 0.5 threes" on a center is not a real bet); same rule as nba/report.py. */
+export const MIN_LINE = 1.5;
 
 export type Offer = { book: string; side: "over" | "under"; line: number; price: number };
 export type NbaRow = {

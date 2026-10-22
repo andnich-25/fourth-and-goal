@@ -1,6 +1,6 @@
 /* NBA Ask: plain-English questions answered only from the published slate. It never invents a number: every answer
    is a list of rows from slate.json with the model's chance at the line shown (or at the number in the question). */
-import { edgeOf, leanOf, marketLabel, overAt, type NbaRow, type Slate } from "./nba";
+import { MIN_LINE, edgeOf, leanOf, marketLabel, overAt, type NbaRow, type Slate } from "./nba";
 import type { Buckets } from "./sim";
 import { simulate } from "./sim";
 
@@ -53,7 +53,7 @@ function playersIn(q: string, rows: NbaRow[]): string[] {
   return hits;
 }
 
-const usable = (r: NbaRow) => !r.out && r.dist != null;
+const usable = (r: NbaRow) => !r.out && r.dist != null && r.line >= MIN_LINE;
 
 export function answer(question: string, slate: Slate, buckets: Buckets = {}, useCorrelation = false): AskAnswer {
   const q = question.toLowerCase().trim();

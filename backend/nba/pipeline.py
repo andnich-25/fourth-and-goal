@@ -219,7 +219,7 @@ def freeze(day: str, rows: list[dict]) -> dict:
     picks = [{"player_id": r["player_id"], "player_name": r["player_name"], "team": r["team"], "game_id": r["game_id"],
               "market": r["market"], "line": r["line"], "line_source": r["line_source"], "p_over": round(r["p_over"], 4),
               "offers": r["offers"]}
-             for r in rows if r["p_over"] is not None and not r["out"]]
+             for r in rows if r["p_over"] is not None and not r["out"] and r["line"] >= report.MIN_LINE]
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps({"date": day, "frozen_at": utcnow(), "picks": picks}))
     return {"date": day, "kept": False, "picks": len(picks)}

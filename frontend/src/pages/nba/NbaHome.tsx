@@ -2,7 +2,7 @@ import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { MessageCircleQuestion } from "lucide-react";
 import { num, pct } from "@/lib/format";
-import { edgeOf, leanOf, marketLabel, nbaTier, score10, useNba, type NbaConfidence, type NbaStatus, type Slate } from "@/lib/nba";
+import { MIN_LINE, edgeOf, leanOf, marketLabel, nbaTier, score10, useNba, type NbaConfidence, type NbaStatus, type Slate } from "@/lib/nba";
 import { PageTitle } from "@/components/Layout";
 import { Card, CardBody, CardHeader, Input, LoadingBlock, Notice, TeamBadge } from "@/components/ui";
 import { TierBadge } from "@/components/shared";
@@ -18,7 +18,7 @@ export default function NbaHome() {
   const [q, setQ] = React.useState("");
   if (slate.isError) return <NotPublished error={slate.error} />;
   const d = slate.data;
-  const picks = (d?.rows ?? []).filter((r) => !r.out && r.evidence.minutes_long >= 20)
+  const picks = (d?.rows ?? []).filter((r) => !r.out && r.evidence.minutes_long >= 20 && r.line >= MIN_LINE)
     .map((r) => ({ r, lean: leanOf(r) })).filter((x) => x.lean && x.lean.p >= 0.6)
     .map((x) => ({ ...x, edge: edgeOf(x.r, x.lean), tier: nbaTier(conf.data, x.lean!.p) }))
     .sort((a, b) => b.lean!.p - a.lean!.p).slice(0, 12);

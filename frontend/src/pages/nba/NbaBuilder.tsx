@@ -2,7 +2,7 @@ import * as React from "react";
 import { Link } from "react-router-dom";
 import { Dices, Plus, Search, Sparkles, Trash2 } from "lucide-react";
 import { cn, num, pct } from "@/lib/format";
-import { NBA_MARKETS, bestOffer, fmtPrice, leanOf, marketLabel, overAt, useNba, type NbaCorrelation, type NbaRow, type Slate } from "@/lib/nba";
+import { MIN_LINE, NBA_MARKETS, bestOffer, fmtPrice, leanOf, marketLabel, overAt, useNba, type NbaCorrelation, type NbaRow, type Slate } from "@/lib/nba";
 import { simulate, toAmerican, toDecimal, type SimLeg } from "@/lib/sim";
 import { PageTitle } from "@/components/Layout";
 import { Button, Card, CardBody, CardHeader, Input, LoadingBlock, Notice, Select, TeamBadge } from "@/components/ui";
@@ -45,7 +45,7 @@ export default function NbaBuilder() {
     .map((r) => ({ r, lean: leanOf(r)! })).sort((a, b) => b.lean.p - a.lean.p).slice(0, search ? 30 : 12);
 
   const suggest = (n: number) => {
-    const pool = rows.filter((r) => !r.out && r.dist && r.evidence.minutes_long >= 24).map((r) => ({ r, lean: leanOf(r)! }))
+    const pool = rows.filter((r) => !r.out && r.dist && r.evidence.minutes_long >= 24 && r.line >= MIN_LINE).map((r) => ({ r, lean: leanOf(r)! }))
       .filter((x) => x.lean.p >= 0.6).sort((a, b) => b.lean.p - a.lean.p);
     const used = new Set<number>(); const pick: SlipItem[] = [];
     for (const x of pool) {

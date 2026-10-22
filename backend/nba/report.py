@@ -6,7 +6,8 @@ import pandas as pd
 
 from . import props
 
-PROP_MIN_MINUTES = 15   # confidence bands are measured on the players the site lists
+PROP_MIN_MINUTES = 15   # confidence bands are measured on the players and lines the site picks from
+MIN_LINE = 1.5          # an "under 0.5" on a player who rarely records the stat is not a real bet
 TIERS = [("Toss-up", 0.50, 0.55), ("Lean", 0.55, 0.60), ("Solid", 0.60, 0.65), ("Strong", 0.65, 1.0)]
 
 
@@ -52,7 +53,7 @@ def market_report(r: pd.DataFrame, market: str, reps: int = 300, seed: int = 3) 
     yl = (hl.y > hl.line).astype(int).to_numpy()
     lean = np.maximum(po, 1 - po)
     hit = np.where(po >= 0.5, y, 1 - y)
-    strong = (lean >= 0.6) & (h.min_l.to_numpy() >= PROP_MIN_MINUTES)
+    strong = (lean >= 0.6) & (h.min_l.to_numpy() >= PROP_MIN_MINUTES) & (h.line.to_numpy() >= MIN_LINE)
     crps_m, crps_b = float(s.crps_m.mean()), float(s.crps_b.mean())
     checks = {
         "enough_rows": len(r) >= 5000,
@@ -100,7 +101,7 @@ def confidence(oos: dict[str, pd.DataFrame], validated: set[str]) -> dict:
     for market, r in oos.items():
         if market not in validated:
             continue
-        h = r[r.line.notna() & (r.min_l >= PROP_MIN_MINUTES)]
+        h = r[r.line.notna() & (r.min_l >= PROP_MIN_MINUTES) & (r.line >= MIN_LINE)]
         parts.append(pd.DataFrame({"market": market, "season": h.season, "p": h.p_over, "y": (h.y > h.line).astype(int)}))
     if not parts:
         return {"props": None}
@@ -120,7 +121,7 @@ def confidence(oos: dict[str, pd.DataFrame], validated: set[str]) -> dict:
         "tiers": tier_rows(lean, hit),
         "by_side": {s: tier_rows(lean[side == s], hit[side == s]) for s in ("over", "under")},
         "by_market": by_market,
-        "note": f"Chance of the side picked, at each player's usual line, on games the model never saw (players averaging {PROP_MIN_MINUTES}+ minutes).",
+        "note": f"Chance of the side picked, at each player's usual line, on games the model never saw (players averaging {PROP_MIN_MINUTES}+ minutes, lines of {MIN_LINE}+).",
     }}
 
 
