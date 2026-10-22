@@ -89,3 +89,15 @@ export function Outcome({ outcome, participated }: { outcome: number | null; par
   if (participated === 0) return <Badge tone="neutral">Did not play</Badge>;
   return outcome ? <Badge tone="accent">TD</Badge> : <Badge tone="neutral">No TD</Badge>;
 }
+
+/** Confidence tier with its real track record, e.g. "Strong · 58% hit in 1,204 past picks". */
+export function TierBadge({ tier, compact = false }: { tier: import("@/lib/confidence").Tier | null; compact?: boolean }) {
+  if (!tier) return null;
+  const tone = tier.tier === "Strong" ? "ok" : tier.tier === "Solid" ? "accent" : tier.tier === "Lean" ? "neutral" : "warn";
+  const record = tier.rate != null ? `${pct(tier.rate, 0)} hit in ${tier.n.toLocaleString()} past picks` : "no past picks";
+  return (
+    <Badge tone={tone} title={`Past walk-forward picks in the ${tier.tier} band (${pct(tier.lo, 0)}–${pct(tier.hi, 0)}): ${record}`}>
+      {tier.tier}{!compact && <span className="font-normal opacity-80"> · {record}</span>}
+    </Badge>
+  );
+}

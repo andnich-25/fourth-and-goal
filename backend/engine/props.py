@@ -33,6 +33,7 @@ PRIOR_SEASON_WEIGHT = 0.5
 DEF_SHRINK_GAMES = 4.0
 TEAM_SHRINK_GAMES = 3.0
 PLAYER_SHRINK_GAMES = 2.0
+RECENCY_HALF_LIFE: float | None = None  # seasons; see engine/recency.py
 QUANTS = np.arange(1, 100) / 100.0  # stored predictive quantiles (1%..99%)
 
 STATS = ["attempts", "completions", "pass_yards", "pass_tds", "interceptions", "carries", "rush_yards", "targets",
@@ -276,7 +277,10 @@ class MeanModel:
         else:  # baseline-player-avg: player's weighted recent average, shrunk toward the position average
             self.pos_mean = train.groupby("position")[self.stat].mean().to_dict()
             return self
-        self.m.fit(train[self.cols].astype(float), y)
+        from .models import recency_weights  # noqa: PLC0415
+        w = recency_weights(train, RECENCY_HALF_LIFE or 0)
+        key = "poissonregressor__sample_weight" if self.name == "props-glm-1" else "sample_weight"
+        self.m.fit(train[self.cols].astype(float), y, **({key: w} if w is not None else {}))
         return self
 
     def predict(self, df: pd.DataFrame) -> np.ndarray:
@@ -327,6 +331,9 @@ class Distribution:
             self.edges = np.quantile(mu, [1 / 3, 2 / 3])
             self.ratio_q = [np.quantile(r[self._bucket(mu) == b], QUANTS) if (self._bucket(mu) == b).sum() >= 50
                             else np.quantile(r, QUANTS) for b in range(3)]
+            # The ratios themselves, so the model can say how much mass it puts on a range. Zero-yard games are a point
+            # mass: a range starting at 0 then holds more than its nominal share.
+            self.ratios = [np.sort(r[self._bucket(mu) == b]) if (self._bucket(mu) == b).sum() >= 50 else np.sort(r) for b in range(3)]
         return self
 
     def _bucket(self, mu):
@@ -355,9 +362,15 @@ class Distribution:
         return p_over_from_quantiles(self.quantiles(mu), line)
 
     def mass_between(self, mu: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
-        """Probability the model itself puts on [lo, hi] (above 0.8 for counts, whose quantiles are whole numbers)."""
+        """Probability the model itself puts on [lo, hi]: above 0.8 for counts, whose quantiles are whole numbers, and for
+        yardage when the range starts at a point mass of zero-yard games."""
         if self.kind != "count":
-            return np.full(len(mu), 0.8)
+            mu = np.clip(np.asarray(mu, float), 0.05, None)
+            out = np.empty(len(mu))
+            for i, (m, b, a, z) in enumerate(zip(mu, self._bucket(mu), np.asarray(lo, float), np.asarray(hi, float))):
+                r = self.ratios[b]
+                out[i] = (np.searchsorted(r, z / m, side="right") - np.searchsorted(r, a / m, side="left")) / len(r)
+            return out
         n = 1.0 / self.alpha
         p = n / (n + np.clip(np.asarray(mu, float), 0.05, None))
         return sps.nbinom.cdf(hi, n, p) - sps.nbinom.cdf(lo - 1, n, p)

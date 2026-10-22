@@ -111,6 +111,12 @@ def walk_forward(c: sqlite3.Connection, feats: pd.DataFrame, test_weeks: list[tu
     if not preds:
         raise RuntimeError("No test weeks could be evaluated (insufficient earlier data).")
     P = pd.concat(preds)
+    # Top-end correction from earlier test weeks only (models.TopEnd); the raw chance is kept as the stored score.
+    t = (P.season * 100 + P.week).to_numpy()
+    y = np.where((P.participated == 1) & P.scored_anytime.notna(), P.scored_anytime, np.nan).astype(float)
+    for name in models.CANDIDATES:
+        P[f"raw::{name}"] = P[f"p::{name}"]
+        P[f"p::{name}"] = models.top_end_walk_forward(t, P[f"p::{name}"].to_numpy(float), y)
     report = evaluate(P, run_id)
     _store(c, run_id, P, report)
     return report
@@ -250,8 +256,9 @@ def _store(c, run_id, P, report):
         rows = []
         for n in names:
             vals = P[f"p::{n}"].values
-            for (s, w, pid, team, pos, name, y, st), v in zip(base.itertuples(index=False, name=None), vals):
+            raw = P[f"raw::{n}"].values if f"raw::{n}" in P else vals
+            for (s, w, pid, team, pos, name, y, st), v, r in zip(base.itertuples(index=False, name=None), vals, raw):
                 prob = None if n == "baseline-opportunity" else float(v)
-                rows.append((run_id, n, int(s), int(w), pid, team, pos, name, prob, float(v),
+                rows.append((run_id, n, int(s), int(w), pid, team, pos, name, prob, float(r),
                              None if y != y else int(y), int(st == "ACT")))
         c.executemany("INSERT OR REPLACE INTO backtest_preds VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows)

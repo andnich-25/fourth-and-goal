@@ -1,3 +1,4 @@
+import * as React from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -5,7 +6,7 @@ import { api } from "@/lib/api";
 import { num, pct, POSITIONS } from "@/lib/format";
 import { useLinkSuffix, useSeasonWeek } from "@/lib/state";
 import { PageTitle } from "@/components/Layout";
-import { Card, CardBody, CardHeader, ErrorState, LoadingBlock, Notice, PosBadge, Stat, TableWrap, Td, TeamBadge, Th } from "@/components/ui";
+import { Badge, Card, CardBody, CardHeader, ErrorState, LoadingBlock, Notice, PosBadge, Segmented, Stat, TableWrap, Td, TeamBadge, Th } from "@/components/ui";
 
 type Bin = { lo: number; hi: number; n: number; scored: number; rate: number | null; ci: [number | null, number | null]; prior_n: number; prior_rate: number | null };
 type Lift = { metric: string; label: string; bins: Bin[]; missing: number; spearman: number | null };
@@ -18,6 +19,56 @@ type Trends = {
   defenses: { defense: string; position: string; tds: number; games: number; xtd: number }[];
   notes: string[]; empty_reason?: string;
 };
+
+type Tendency = { group: string; metric: string; label: string; in_model: boolean; r_half: number | null; r_next: number | null; n_half: number; n_next: number; verdict: string };
+type SitCell = { n: number; rate: number | null; ci: [number | null, number | null] };
+type Tendencies = { seasons: [number, number]; player_games: number; tendencies: Tendency[]; notes: string[]; empty_reason?: string;
+  situations: { factor: string; label: string; rows: ({ bucket: string } & Record<"RB" | "WR" | "TE", SitCell>)[] }[] };
+
+function TendencyCard() {
+  const q = useQuery({ queryKey: ["tendencies"], queryFn: () => api.get<Tendencies>("/tendencies") });
+  const d = q.data;
+  const [group, setGroup] = React.useState("RBs");
+  if (!d || d.empty_reason) return null;
+  const groups = [...new Set(d.tendencies.map((t) => t.group))];
+  const rows = d.tendencies.filter((t) => t.group === group).sort((a, b) => ((b.r_half ?? 0) + (b.r_next ?? 0)) - ((a.r_half ?? 0) + (a.r_next ?? 0)));
+  const tone = (v: string) => (v === "Repeats strongly" ? "ok" : v === "Some signal" ? "neutral" : "warn") as "ok" | "neutral" | "warn";
+  return (
+    <>
+      <Card>
+        <CardHeader title={`Which tendencies are real? (${d.seasons[0]}–${d.seasons[1]})`}
+          subtitle="A pattern only helps predict if it repeats. 1.0 = repeats perfectly, 0 = pure luck." />
+        <div className="overflow-x-auto px-4 pb-2 sm:px-5">
+          <Segmented size="sm" label="Group" value={group} onChange={setGroup} options={groups.map((g) => ({ value: g, label: g }))} />
+        </div>
+        <TableWrap>
+          <table className="w-full"><thead><tr><Th>Tendency</Th><Th className="text-right" title="Odd weeks vs even weeks of the same season">Within a season</Th>
+            <Th className="text-right" title="One season vs the next">Season to season</Th><Th>Verdict</Th><Th>Used by model</Th></tr></thead>
+            <tbody>{rows.map((t) => (
+              <tr key={t.metric} className="border-b border-line/60"><Td>{t.label}</Td><Td className="text-right">{num(t.r_half, 2)}</Td><Td className="text-right">{num(t.r_next, 2)}</Td>
+                <Td><Badge tone={tone(t.verdict)}>{t.verdict}</Badge></Td><Td className="text-muted">{t.in_model ? "Yes" : "—"}</Td></tr>))}</tbody></table>
+        </TableWrap>
+        <CardBody className="space-y-1 text-xs text-muted">
+          <p><b className="text-fg">What this means:</b> a player's red-zone role, targets and snap share carry over strongly, so they drive the picks. Scoring more or fewer TDs than expected (finishing) and a defense's TDs allowed barely repeat, so the model treats them as mostly luck and only nudges for them.</p>
+          {d.notes.map((n) => <p key={n}>{n}</p>)}
+        </CardBody>
+      </Card>
+      <Card>
+        <CardHeader title="Game situations" subtitle={`How often players with a red-zone role scored, ${d.seasons[0]}–${d.seasons[1]} (${d.player_games.toLocaleString()} player-games)`} />
+        <CardBody className="grid gap-5 md:grid-cols-2">
+          {d.situations.map((s) => (
+            <div key={s.factor}><div className="mb-1 text-sm font-medium">{s.label}</div>
+              <table className="w-full text-sm"><thead><tr className="text-[11px] uppercase tracking-wide text-muted"><th className="text-left font-medium" />{(["RB", "WR", "TE"] as const).map((p) => <th key={p} className="text-right font-medium">{p}</th>)}</tr></thead>
+                <tbody>{s.rows.map((r) => (
+                  <tr key={r.bucket} className="border-t border-line/50"><td className="py-1 text-muted">{r.bucket}</td>
+                    {(["RB", "WR", "TE"] as const).map((p) => <td key={p} className="py-1 text-right" title={`${r[p].n.toLocaleString()} player-games`}>{pct(r[p].rate, 0)}</td>)}</tr>))}</tbody></table>
+            </div>
+          ))}
+        </CardBody>
+      </Card>
+    </>
+  );
+}
 
 const binLabel = (b: Bin) => (b.hi >= 9 ? `${b.lo}+` : `${b.lo}–${b.hi}`);
 
@@ -36,7 +87,9 @@ export default function TrendsPage() {
   }));
   return (
     <div className="space-y-5">
-      <PageTitle kicker={`${d.season} · Weeks ${d.weeks[0]}–${d.weeks[d.weeks.length - 1]}`} title="Who is scoring" />
+      <PageTitle kicker={`History and ${d.season} so far`} title="Trends" />
+      <TendencyCard />
+      <h2 className="pt-2 font-display text-lg font-semibold">{d.season} so far · Weeks {d.weeks[0]}–{d.weeks[d.weeks.length - 1]}</h2>
       <Card>
         <CardBody className="flex flex-wrap gap-8">
           <Stat label="Rush + rec TDs" value={d.touchdowns} />
@@ -46,7 +99,7 @@ export default function TrendsPage() {
         </CardBody>
       </Card>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card>
           <CardHeader title="Where touchdowns start" subtitle="Yards from the goal line at the snap of the scoring play" />
           <CardBody className="h-64">
@@ -92,7 +145,7 @@ export default function TrendsPage() {
         </CardBody>
       </Card>
 
-      <div className="grid gap-5 xl:grid-cols-[3fr_2fr]">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <Card>
           <CardHeader title="Touchdown leaders" subtitle="Scoring chances and play-based xTD alongside actual TDs" />
           <TableWrap>

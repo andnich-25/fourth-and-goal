@@ -70,3 +70,18 @@ def test_odds_feed_matches_players_and_never_guesses(oddsdb, monkeypatch):
 def test_odds_skip_without_key(oddsdb, monkeypatch):
     monkeypatch.delenv("ODDS_API_KEY", raising=False)
     assert odds.maybe_fetch(oddsdb, 2026, log=lambda m: None) is None
+
+
+def test_record_grades_frozen_chances_at_best_price(oddsdb, tmp_path):
+    import json
+    oddsdb.execute("INSERT INTO player_game(season, week, player_id, team, position, participated, scored_anytime) "
+                   "VALUES (2026, 7, 'p1', 'CHI', 'RB', 1, 1)")
+    oddsdb.commit()
+    odds.odds_dir().mkdir(parents=True, exist_ok=True)
+    snap = {"season": 2026, "week": 7, "fetched_at": "2026-10-22T00:00:00+00:00", "rows": [
+        {"market": "td", "player_id": "p1", "book": "DraftKings", "side": "yes", "line": None, "price": 120, "model_p": 0.5},
+        {"market": "td", "player_id": "p1", "book": "FanDuel", "side": "yes", "line": None, "price": 150, "model_p": 0.5}]}
+    odds.snapshot_path(2026, 7).write_text(json.dumps(snap))
+    r = odds.record(oddsdb)
+    assert r["picks"] == 1 and r["wins"] == 1
+    assert abs(r["units"] - 1.5) < 1e-9  # best price +150 used

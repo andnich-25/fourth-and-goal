@@ -51,7 +51,7 @@ def main(argv=None):
         n += 1
         return r.json()
 
-    for p in ("/health", "/data/status", "/parlay/model", "/backtest/tuning", "/backtest/summary", "/backtest/weeks", "/backtest/calibration", "/feature-glossary"):
+    for p in ("/health", "/data/status", "/parlay/model", "/odds/record", "/tendencies", "/backtest/confidence", "/backtest/tuning", "/backtest/summary", "/backtest/weeks", "/backtest/calibration", "/feature-glossary"):
         save(p)
     wk = save("/weeks")
     pm = save("/props/markets")

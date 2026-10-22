@@ -4,7 +4,7 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from engine import props, scoring_trends
+from engine import props, scoring_trends, tendencies
 
 from ..core import default_season_week, get_db, loads
 
@@ -94,3 +94,11 @@ def props_backtest(market: str, c: sqlite3.Connection = Depends(get_db)):
 def trends(season: int | None = None, c: sqlite3.Connection = Depends(get_db)):
     ds, _ = default_season_week(c)
     return scoring_trends.build(c, season or ds)
+
+
+@router.get("/tendencies")
+def tendency_report(c: sqlite3.Connection = Depends(get_db)):
+    from engine import sources  # noqa: PLC0415
+
+    ds, _ = default_season_week(c)
+    return tendencies.build(c, sources.history_start(ds) + 1, ds - 1)

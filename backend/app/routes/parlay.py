@@ -39,3 +39,8 @@ def week_odds(season: int | None = None, week: int | None = None, c: sqlite3.Con
         return {"season": season, "week": week, "fetched_at": None, "rows": [],
                 "empty_reason": "No sportsbook prices have been fetched for this week. Type prices in, or add an ODDS_API_KEY."}
     return snap
+
+
+@router.get("/odds/record")
+def odds_record(c: sqlite3.Connection = Depends(get_db)):
+    return odds.record(c)

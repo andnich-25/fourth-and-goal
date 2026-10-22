@@ -43,15 +43,26 @@ KINDS: dict[str, SourceKind] = {
 }
 
 
-def plan(season: int = 2026, start_year: int = 2023) -> list[dict]:
+# How far back the engine reads. The first season only seeds xTD rates and recent-form features; models are
+# trained on every later season and tested week by week from TEST_SEASONS back.
+HISTORY_SEASONS = 8   # 2018 when the current season is 2026
+TEST_SEASONS = 5      # walk-forward test weeks: 2021 onward (plus the current season)
+
+
+def history_start(season: int) -> int:
+    return season - HISTORY_SEASONS
+
+
+def plan(season: int = 2026, start_year: int | None = None) -> list[dict]:
     """Ordered import plan: (kind, season, required)."""
+    start_year = history_start(season) if start_year is None else start_year
     out = []
     for yr in range(start_year, season + 1):
         out.append({"kind": "pbp", "season": yr, "required": True})
         out.append({"kind": "stats", "season": yr, "required": True})
     out.append({"kind": "roster", "season": season, "required": True})
     out.append({"kind": "schedules", "season": 0, "required": False})
-    for yr in range(max(start_year + 1, season - 2), season + 1):
+    for yr in range(start_year + 1, season + 1):
         if yr != season:
             out.append({"kind": "roster", "season": yr, "required": False})
         out.append({"kind": "injuries", "season": yr, "required": False})

@@ -36,6 +36,15 @@ def value(row: dict, *keys: str) -> str:
     return ""
 
 
+# Relocated or renamed franchises map to today's code so a team's history stays continuous.
+TEAM_ALIASES = {"OAK": "LV", "SD": "LAC", "STL": "LA", "LAR": "LA", "JAC": "JAX", "WSH": "WAS"}
+
+
+def team(row: dict, *keys: str) -> str:
+    v = value(row, *keys)
+    return TEAM_ALIASES.get(v, v)
+
+
 def csv_reader(path):
     handler = gzip.open if str(path).endswith(".gz") else open
     f = handler(path, "rt", newline="", encoding="utf-8-sig")

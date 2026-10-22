@@ -80,19 +80,26 @@ Season and week live in the URL (`?season=2026&week=7`) so every view is linkabl
 5. **Models.** `fg-structural-1` (team TD expectation from the implied total, times shrunk player xTD share, times opponent adjustment, Poisson link, isotonic calibration), `fg-logit-1` (logistic regression) and `fg-gbm-1` (gradient boosting). Baselines: position rate, shrunk player TD rate, opportunity volume (rank only).
 6. **Walk-forward + gate.** Each test week is predicted from models fit only on earlier player-games. A candidate is promoted only if, on unseen weeks, it beats both probability baselines on Brier and log loss, the week-bootstrap 95% CI of the log-loss gain excludes zero, ECE ≤ 0.025, there are ≥ 2,000 test rows and ≥ 10 weeks, and it is not worse than the baseline on the latest season. The simplest passing model within 0.001 log loss of the best wins. If none pass, the API returns `p_model: null` everywhere and the UI shows research scores (percentiles) instead.
 
-### Result of the current run (real nflverse data, imported 2026-10-21)
+### Result of the current run (real nflverse data, 2018–2026, imported 2026-10-22)
 
-Test weeks: 2025 W1–W18 and 2026 W1–W6 (24 weeks, 8,940 player-games, TD base rate 16.3%).
+Test weeks: 2021 W1 through 2026 W6 (96 weeks, 34,538 player-games). Every week is predicted only from games before it.
 
 | Model | Brier | Log loss | AUC | ECE |
 |---|---|---|---|---|
-| **fg-logit-1 (promoted)** | 0.1197 | 0.3868 | 0.755 | 0.006 |
-| fg-gbm-1 | 0.1197 | 0.3867 | 0.756 | 0.009 |
-| fg-structural-1 | 0.1222 | 0.3967 | 0.728 | 0.008 |
-| Baseline: shrunk player rate | 0.1257 | 0.4088 | 0.704 | 0.012 |
-| Baseline: position rate | 0.1354 | 0.4410 | 0.566 | 0.005 |
+| **fg-logit-1 (promoted)** | 0.1222 | 0.3933 | 0.749 | 0.005 |
+| fg-gbm-1 | 0.1221 | 0.3931 | 0.749 | 0.004 |
+| fg-structural-1 | 0.1255 | 0.4056 | 0.719 | 0.003 |
+| Baseline: shrunk player rate | 0.1275 | 0.4142 | 0.699 | 0.014 |
+| Baseline: position rate | 0.1367 | 0.4436 | 0.577 | 0.009 |
 
-Top-3 by the promoted model: 47 of 72 picks scored (65%, Wilson 95% CI 54–75%). With the Top 3 evidence rules (one leg per game, no Questionable/Doubtful), all three legs scored in 8 of 24 weeks (33%). The calibration curve is thin above 60%: only 111 of 8,940 test predictions were that high, and they ran a few points hot, so the UI warns on any leg at 70% or more.
+By position the model matches reality (RB 21.2% predicted vs 22.6% scored, WR 16.3% vs 16.6%, TE 11.6% vs 11.7%), so the run of RBs at the top reflects how touchdowns are distributed, not a bias. With the top-end correction, the 829 test predictions of 50% or more averaged 52.8% and 52.0% scored.
+
+### Recent seasons count more, and the top end is checked
+
+History runs from 2018 (team moves such as OAK→LV are mapped to today's codes). Walk-forward testing covers the last five seasons plus the current one. Two settings were chosen on 2021–2023 and confirmed once on 2024–2026 (`python -m engine.recency`):
+
+* **Recency weighting.** A training game's weight halves every two seasons of age (`models.RECENCY_HALF_LIFE = 2.0`), so last season counts about twice as much as three seasons ago and a game from six seasons ago counts about an eighth. It beat equal weights on the held-out seasons.
+* **Top-end correction.** Chances above 50% ran a few points high. Each week, a small logistic correction with a hinge at 50% is fit on all earlier weeks' out-of-sample chances and applied (`models.TOP_END_KNOT`). On 2024–2026 the 50%+ group went from 57.5% predicted / 53.8% observed to 52.9% / 52.2%.
 
 ## Player props
 
@@ -112,7 +119,7 @@ The browser repeats the same model (`frontend/src/lib/sim.ts`): 40,000 correlate
 
 ## Sportsbook prices (optional)
 
-`engine/odds.py` reads current prices from The Odds API (a licensed feed; scraping sportsbook sites is against their terms) for anytime TD, receptions, passing yards, passing TDs, interceptions and rush attempts across US books. Add a free key at the-odds-api.com as the repository secret `ODDS_API_KEY`. Each fetch costs about 6 credits per game (about 90-100 a week); the free plan has 500 a month, so the hosted site fetches on the Saturday run and on manual runs only, and keeps the snapshot between runs. Without a key, prices are typed in. Locally: `ODDS_API_KEY=... python -m engine.odds`.
+`engine/odds.py` reads current prices from The Odds API (a licensed feed; scraping sportsbook sites is against their terms) for anytime TD, receptions, receiving yards, rushing yards, passing yards and passing TDs across US books. Add a free key at the-odds-api.com as the repository secret `ODDS_API_KEY`. Each fetch costs about 6 credits per game (about 90-100 a week); the free plan has 500 a month, so the hosted site fetches on the Saturday run and on manual runs only, and keeps the snapshot between runs. Without a key, prices are typed in. Locally: `ODDS_API_KEY=... python -m engine.odds`.
 
 ## Data honesty rules enforced in code
 

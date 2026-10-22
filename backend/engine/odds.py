@@ -31,9 +31,10 @@ MARKETS = {
     "receptions": "player_receptions",
     "pass_yards": "player_pass_yds",
     "pass_tds": "player_pass_tds",
-    "interceptions": "player_pass_interceptions",
-    "carries": "player_rush_attempts",
+    "rec_yards": "player_reception_yds",
+    "rush_yards": "player_rush_yds",
 }
+# Six markets keep the weekly fetch inside the free plan; these are the most widely offered player props.
 BOOKS = {"draftkings": "DraftKings", "fanduel": "FanDuel", "betmgm": "BetMGM", "williamhill_us": "Caesars", "espnbet": "ESPN BET",
          "fanatics": "Fanatics", "betrivers": "BetRivers", "ballybet": "Bally Bet", "hardrockbet": "Hard Rock", "betonlineag": "BetOnline",
          "bovada": "Bovada", "mybookieag": "MyBookie", "betus": "BetUS", "lowvig": "LowVig"}
@@ -87,6 +88,41 @@ def _players(c: sqlite3.Connection, season: int, week: int) -> dict[tuple[str, s
     return out
 
 
+def p_over_desc(desc: dict, line: float) -> float:
+    """P(result > line) from a published distribution (same rule as Distribution.p_over and frontend pOver)."""
+    import numpy as np  # noqa: PLC0415
+
+    from .props import p_over_from_quantiles  # noqa: PLC0415
+    if desc["type"] == "nbinom":
+        k = int(np.floor(line))
+        raw = 0.995 if k < 0 else 0.005 if k >= len(desc["cdf"]) else 1 - desc["cdf"][k]
+    else:
+        raw = float(p_over_from_quantiles(np.array([desc["q"]], float), np.array([line], float))[0])
+    raw = min(0.995, max(0.005, raw))
+    a, b = desc.get("platt") or (1.0, 0.0)
+    z = a * np.log(raw / (1 - raw)) + b
+    return float(min(0.995, max(0.005, 1 / (1 + np.exp(-z)))))
+
+
+def _model_chances(c: sqlite3.Connection, season: int, week: int) -> tuple[dict, dict]:
+    """Our pregame chances for the week: TD p from the latest prediction run, prop distributions from the latest projection."""
+    td = {}
+    run = c.execute("SELECT run_id FROM predictions WHERE season=? AND week=? AND p_model IS NOT NULL "
+                    "ORDER BY rowid DESC LIMIT 1", (season, week)).fetchone()
+    if run:
+        for r in c.execute("SELECT player_id, p_model FROM predictions WHERE run_id=? AND season=? AND week=? AND eligible=1",
+                           (run["run_id"], season, week)):
+            td[r["player_id"]] = r["p_model"]
+    dist = {}
+    prun = c.execute("SELECT run_id FROM prop_projections JOIN prop_runs USING(run_id) WHERE season=? AND week=? "
+                     "ORDER BY created_at DESC LIMIT 1", (season, week)).fetchone()
+    if prun:
+        for r in c.execute("SELECT market, player_id, dist FROM prop_projections WHERE run_id=? AND calibrated=1 AND eligible=1",
+                           (prun["run_id"],)):
+            dist[(r["market"], r["player_id"])] = json.loads(r["dist"])
+    return td, dist
+
+
 def fetch(c: sqlite3.Connection, season: int, week: int, key: str, log=print) -> dict:
     games = _week_games(c, season, week)
     if not games:
@@ -104,6 +140,7 @@ def fetch(c: sqlite3.Connection, season: int, week: int, key: str, log=print) ->
     if remaining is not None and float(remaining) < cost:
         raise RuntimeError(f"Not enough Odds API credits left this month ({remaining} < {cost}); keeping the previous snapshot.")
     players = _players(c, season, week)
+    td_p, dists = _model_chances(c, season, week)
     rows, unmatched, errors = [], {}, []
     for e, g in todo:
         try:
@@ -131,7 +168,15 @@ def fetch(c: sqlite3.Connection, season: int, week: int, key: str, log=print) ->
                         unmatched[name] = unmatched.get(name, 0) + 1
                         continue
                     hit = players[(team, norm_name(name))]
-                    rows.append({"game_id": g["game_id"], "market": market, "player_id": hit[0], "player_name": hit[1], "team": team,
+                    # Our pregame chance for this exact side and line, frozen with the price so the week can be graded honestly.
+                    if market == "td":
+                        mp = td_p.get(hit[0])
+                    elif (market, hit[0]) in dists and o.get("point") is not None:
+                        po = p_over_desc(dists[(market, hit[0])], float(o["point"]))
+                        mp = po if side == "over" else 1 - po
+                    else:
+                        mp = None
+                    rows.append({"model_p": None if mp is None else round(float(mp), 4),"game_id": g["game_id"], "market": market, "player_id": hit[0], "player_name": hit[1], "team": team,
                                  "book": book, "side": side, "line": o.get("point"), "price": int(o["price"]),
                                  "updated": m.get("last_update") or b.get("last_update")})
     snap = {"season": season, "week": week, "fetched_at": utcnow(), "source": "The Odds API (the-odds-api.com), US books",
@@ -144,6 +189,50 @@ def fetch(c: sqlite3.Connection, season: int, week: int, key: str, log=print) ->
     log(f"odds: saved {len(rows)} prices from {len({r['book'] for r in rows})} books; {len(unmatched)} names unmatched; "
         f"{remaining} credits remaining")
     return snap
+
+
+def _decimal(american: int) -> float:
+    return 1 + (american / 100 if american > 0 else 100 / -american)
+
+
+def record(c: sqlite3.Connection, min_edge: float = 0.03) -> dict:
+    """Grade every saved snapshot: for each player/market/side, take the best price, compare with our frozen chance,
+    and settle against the box score. Flat 1-unit stakes on every pick where our chance beat the price's chance by min_edge
+    (the same 3-point bar the home page uses)."""
+    from .props import MARKETS as PROP_MARKETS, load_history  # noqa: PLC0415
+    import pandas as pd  # noqa: PLC0415
+
+    snaps = [json.loads(p.read_text()) for p in sorted(odds_dir().glob("*.json"))] if odds_dir().exists() else []
+    rows = [dict(r, season=s["season"], week=s["week"]) for s in snaps for r in s["rows"] if r.get("model_p") is not None]
+    if not rows:
+        return {"weeks": 0, "picks": 0, "empty_reason": "No graded price snapshots yet. The record starts with the first weekly price pull."}
+    df = pd.DataFrame(rows)
+    df["dec"] = df.price.map(_decimal)
+    best = df.sort_values("dec").groupby(["season", "week", "market", "player_id", "side", "line"], dropna=False).tail(1).copy()
+    best["implied"] = 1 / best.dec
+    best["edge"] = best.model_p - best.implied
+    h = load_history(c)
+    pg = pd.read_sql_query("SELECT season, week, player_id, scored_anytime FROM player_game WHERE participated=1", c)
+    out = []
+    for r in best.itertuples():
+        if r.market == "td":
+            m = pg[(pg.season == r.season) & (pg.week == r.week) & (pg.player_id == r.player_id)]
+            y = None if m.empty else int(m.scored_anytime.iloc[0])
+        else:
+            st = PROP_MARKETS[r.market]["stat"]
+            m = h[(h.season == r.season) & (h.week == r.week) & (h.player_id == r.player_id)]
+            y = None if m.empty or r.line is None else int((m[st].iloc[0] > r.line) == (r.side == "over"))
+        out.append(y)
+    best["won"] = out
+    graded = best[best.won.notna()]
+    picks = graded[graded.edge > min_edge]
+    profit = float((picks.won * picks.dec - 1).sum()) if len(picks) else 0.0
+    return {"weeks": int(graded[["season", "week"]].drop_duplicates().shape[0]), "priced_legs": int(len(graded)),
+            "picks": int(len(picks)), "wins": int(picks.won.sum()) if len(picks) else 0,
+            "win_rate": float(picks.won.mean()) if len(picks) else None, "avg_chance": float(picks.model_p.mean()) if len(picks) else None,
+            "avg_implied": float(picks.implied.mean()) if len(picks) else None, "units": profit,
+            "roi": profit / len(picks) if len(picks) else None,
+            "note": "Each pick risks 1 unit at the best price found at fetch time; our chance was frozen at the same moment."}
 
 
 def maybe_fetch(c: sqlite3.Connection, season: int, log=print, force: bool = False, max_age_hours: float = 30) -> dict | None:

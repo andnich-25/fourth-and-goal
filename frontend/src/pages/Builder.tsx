@@ -4,8 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Dices, Download, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn, num, pct } from "@/lib/format";
+import { tierFor, useConfidence } from "@/lib/confidence";
 import { feedLine, useFeed, type Feed } from "@/lib/feed";
-import { pOver, type PropDist } from "@/lib/props";
+import { TierBadge } from "@/components/shared";
+import { MARKET_GROUPS, pOver, type PropDist } from "@/lib/props";
 import { bestPrice, coHits, simulate, toAmerican, toDecimal, type Buckets, type SimLeg } from "@/lib/sim";
 import { csv, saveCsv } from "@/lib/static";
 import { useLinkSuffix, useSeasonWeek } from "@/lib/state";
@@ -13,7 +15,9 @@ import type { RankingRow, RankingsResponse, Top3Response } from "@/lib/types";
 import { PageTitle } from "@/components/Layout";
 import { Badge, Button, Card, CardBody, CardHeader, ErrorState, Input, LoadingBlock, Notice, PosBadge, Segmented, Select, TableWrap, Td, TeamBadge, Th } from "@/components/ui";
 
-const BOOKS = ["DraftKings", "FanDuel", "BetMGM", "Caesars", "ESPN BET", "Fanatics"];
+const BOOKS = ["DraftKings", "FanDuel", "BetMGM", "Caesars", "BetRivers", "Fanatics"];
+const MIN_EDGE = 0.03;
+const POSITIONS = ["All", "QB", "RB", "WR", "TE"];
 const SLIP_KEY = "fg-parlay-slip-v1";
 const LINES_KEY = "fg-prop-lines-v1";
 
@@ -87,6 +91,7 @@ function Build({ model, ranks, season, week }: { model?: ParlayModel; ranks?: Ra
   React.useEffect(() => { const all = load<Record<string, SlipLeg[]>>(SLIP_KEY, {}); all[slipKey] = slip; store(SLIP_KEY, all); }, [slip, slipKey]);
   const [quoted, setQuoted] = React.useState<{ book: string; odds: string }>({ book: BOOKS[0], odds: "" });
   const feed = useFeed(season, week);
+  const conf = useConfidence();
   const top3 = useQuery({ queryKey: ["top3", season, week, []], queryFn: () => api.get<Top3Response>("/weekly-top3", { season, week, exclude: [] }) });
 
   const withFeed = (l: SlipLeg): SlipLeg => ({ ...l, prices: { ...l.prices, ...feedPrices(feed, l) } });
@@ -164,6 +169,7 @@ function Build({ model, ranks, season, week }: { model?: ParlayModel; ranks?: Ra
                               <Input aria-label={`Line for ${l.name}`} className="h-7 w-20 text-sm" type="number" step="0.5" defaultValue={l.line}
                                 onBlur={(e) => setLine(l.id, Number(e.target.value))} />
                               <span>{l.label.toLowerCase()}</span></>}
+                            <TierBadge compact tier={tierFor(conf.data, l.market === "td" ? "td" : "props", l.market === "td" ? l.p : Math.max(l.p, 1 - l.p))} />
                             {rh && <Badge title="Context only: the model already weighs recent games">{l.side === "over" ? "over" : "under"} in {rh.hits} of last {rh.games}</Badge>}
                           </div>
                         </div>
@@ -257,6 +263,10 @@ function Picker({ ranks, season, week, slip, add, buckets, useCorr, setSlip, fee
   React.useEffect(() => store(LINES_KEY, lines), [lines]);
   const [nLegs, setNLegs] = React.useState(3);
   const [sameGameOk, setSameGameOk] = React.useState(true);
+  const [goal, setGoal] = React.useState<"likely" | "value">("likely");
+  const [pos, setPos] = React.useState("All");
+  const [suggestNote, setSuggestNote] = React.useState("");
+  React.useEffect(() => setSuggestNote(""), [source, goal, pos]);
   const markets = useQuery({ queryKey: ["props-markets"], queryFn: () => api.get<{ markets: MarketMeta[] }>("/props/markets") });
   const validated = (markets.data?.markets ?? []).filter((x) => x.validated);
   const meta = validated.find((x) => x.market === source);
@@ -264,37 +274,60 @@ function Picker({ ranks, season, week, slip, add, buckets, useCorr, setSlip, fee
     queryFn: () => api.get<PropsResp>("/props", { season, week, market: source }) });
   const inSlip = new Set(slip.map((l) => l.id));
   const q = search.toLowerCase();
-  const tdRows = (ranks?.rows ?? []).filter((r) => r.p_model != null && r.game_id && (!q || r.player_name.toLowerCase().includes(q)))
+  const posOk = (p: string) => pos === "All" || p === pos;
+  const tdRows = (ranks?.rows ?? []).filter((r) => r.p_model != null && r.game_id && posOk(r.position) && (!q || r.player_name.toLowerCase().includes(q)))
     .sort((a, b) => (b.p_model as number) - (a.p_model as number));
-  const propRows = (props.data?.rows ?? []).filter((r) => r.eligible && r.dist && (!q || r.player_name.toLowerCase().includes(q)));
+  const propRows = (props.data?.rows ?? []).filter((r) => r.eligible && r.dist && posOk(r.position) && (!q || r.player_name.toLowerCase().includes(q)));
   const lineKey = (r: PropRow) => `${season}-${week}-${source}-${r.player_id}`;
   const lineOf = (r: PropRow) => lines[lineKey(r)]?.line ?? (feedLine(feed, source, r.player_id)?.toString() ?? "");
 
-  // Suggest: greedily add the leg that keeps the simulated all-hit chance highest.
+  // Suggest, from the selected market only. "Most likely" greedily adds the leg that keeps the simulated all-hit chance
+  // highest. "Best value" uses only legs whose model chance beats the best sportsbook price by MIN_EDGE, and greedily
+  // adds the leg that raises the expected return (simulated all-hit chance x combined best price) the most.
+  const pricedEdge = (l: SlipLeg) => {
+    const b = bestPrice(feedPrices(feed, l));
+    return b ? { leg: { ...l, prices: feedPrices(feed, l) }, dec: b.decimal, edge: l.p - 1 / b.decimal } : null;
+  };
+  const candidates = (): SlipLeg[] => {
+    if (source === "td") return goal === "likely" ? tdRows.slice(0, 30).map(tdLeg) : tdRows.map(tdLeg);
+    if (!meta) return [];
+    const out: SlipLeg[] = [];
+    for (const r of propRows) {
+      const raw = lineOf(r), ln = Number(raw);
+      if (!raw || !Number.isFinite(ln)) continue;
+      for (const side of ["over", "under"] as const) out.push(propLeg(r, source, meta.label, ln, side));
+    }
+    return goal === "likely" ? out.filter((l) => l.p >= 0.5) : out;
+  };
   const suggest = () => {
-    const pool: SlipLeg[] = tdRows.slice(0, 30).map(tdLeg);
-    if (source !== "td" && meta) {
-      for (const r of propRows) {
-        const raw = lineOf(r), ln = Number(raw);
-        if (!raw || !Number.isFinite(ln)) continue;
-        for (const side of ["over", "under"] as const) { const l = propLeg(r, source, meta.label, ln, side); if (l.p >= 0.5) pool.push(l); }
-      }
+    let pool = candidates();
+    const dec = new Map<string, number>();
+    if (goal === "value") {
+      pool = pool.flatMap((l) => { const e = pricedEdge(l); if (!e || e.edge < MIN_EDGE) return []; dec.set(e.leg.id, e.dec); return [e.leg]; });
     }
     const chosen: SlipLeg[] = [];
+    let current = goal === "value" ? 0 : -1;
     for (let k = 0; k < nLegs; k++) {
-      let bestLeg: SlipLeg | null = null, bestP = -1;
+      let bestLeg: SlipLeg | null = null, bestScore = -Infinity;
       for (const c of pool) {
-        if (chosen.some((x) => x.id === c.id || (x.player_id === c.player_id && x.market === c.market))) continue;
+        if (chosen.some((x) => x.id === c.id || x.player_id === c.player_id)) continue;
         if (!sameGameOk && chosen.some((x) => x.game_id === c.game_id)) continue;
-        const p = simulate([...chosen, c], buckets, useCorr, 6000, 99).joint;
-        if (p > bestP) { bestP = p; bestLeg = c; }
+        const legs = [...chosen, c];
+        const p = simulate(legs, buckets, useCorr, 6000, 99).joint;
+        const score = goal === "value" ? p * legs.reduce((a, x) => a * (dec.get(x.id) as number), 1) - 1 : p;
+        if (score > bestScore) { bestScore = score; bestLeg = c; }
       }
-      if (!bestLeg) break;
+      if (!bestLeg || (goal === "value" && bestScore <= current)) break;
       chosen.push(bestLeg);
+      current = bestScore;
     }
-    setSlip(chosen);
+    const noLines = source !== "td" && !candidates().length && !propRows.some((r) => lineOf(r) !== "");
+    setSuggestNote(chosen.length ? "" : noLines ? "No book lines for this market yet: type a line next to the players you want, or wait for the Saturday price pull."
+      : goal === "value" ? (feed.at ? "No leg in this market beats the best sportsbook price by 3+ points right now."
+        : "Best value needs sportsbook prices, and none have been fetched for this week yet.")
+      : "No leg in this market is more likely than not at its line.");
+    if (chosen.length) setSlip(chosen);
   };
-
   return (
     <Card className="min-w-0">
       <CardHeader title="Add legs" subtitle="Only markets whose chances passed validation are offered" />
@@ -302,22 +335,32 @@ function Picker({ ranks, season, week, slip, add, buckets, useCorr, setSlip, fee
         <div className="flex flex-wrap items-center gap-2">
           <Select aria-label="Market" value={source} onChange={(e) => setSource(e.target.value)} className="w-48">
             <option value="td">Anytime TD</option>
-            {validated.map((x) => <option key={x.market} value={x.market}>{x.label}</option>)}
+            {MARKET_GROUPS.map((g) => {
+              const opts = validated.filter((x) => g.markets.includes(x.market));
+              return opts.length ? <optgroup key={g.label} label={g.label}>{opts.map((x) => <option key={x.market} value={x.market}>{x.label}</option>)}</optgroup> : null;
+            })}
           </Select>
           <div className="relative min-w-0 flex-1 basis-40">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted" aria-hidden />
             <Input aria-label="Search players" placeholder="Search players" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
           </div>
         </div>
+        <Segmented size="sm" label="Position" value={pos} onChange={setPos} options={POSITIONS.map((p) => ({ value: p, label: p }))} />
         <div className="flex flex-wrap items-center gap-2 rounded-lg bg-raised/50 p-2 text-sm">
           <Sparkles className="h-4 w-4 text-accent" aria-hidden />
-          <span>Suggest the most likely</span>
+          <span>Suggest the</span>
+          <Select aria-label="Suggestion goal" value={goal} onChange={(e) => setGoal(e.target.value as "likely" | "value")} className="h-8 w-32 text-xs">
+            <option value="likely">most likely</option><option value="value">best value</option></Select>
           <Select aria-label="Number of legs" value={nLegs} onChange={(e) => setNLegs(Number(e.target.value))} className="h-8 w-16 text-xs">
             {[2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}</Select>
           <span>legs</span>
           <label className="flex items-center gap-1 text-xs text-muted"><input type="checkbox" checked={sameGameOk} onChange={(e) => setSameGameOk(e.target.checked)} />same game allowed</label>
-          <Button size="sm" variant="primary" onClick={suggest} disabled={!tdRows.length}>Suggest</Button>
-          <span className="w-full text-xs text-muted">Uses the top anytime-TD chances{source !== "td" ? " plus every prop in this market that has a line" : ""}. Most likely is not the same as best value: add prices to compare.</span>
+          <Button size="sm" variant="primary" onClick={suggest} disabled={source === "td" ? !tdRows.length : !propRows.length}>Suggest</Button>
+          <span className="w-full text-xs text-muted">
+            Picks only from {source === "td" ? "anytime TDs" : `${meta?.label.toLowerCase() ?? "this market"} (players with a line)`}{pos !== "All" ? `, ${pos}s only` : ""}.{" "}
+            {goal === "likely" ? "Most likely is not the same as best value." : "Best value: only legs our chance beats the best book price by 3+ points, combined for the highest expected return."}
+          </span>
+          {suggestNote && <span className="w-full text-xs text-warn">{suggestNote}</span>}
         </div>
         {source === "td" ? (
           !ranks ? <LoadingBlock rows={6} /> : !tdRows.length ? <div className="text-sm text-muted">No validated anytime-TD chances for this week.</div> : (

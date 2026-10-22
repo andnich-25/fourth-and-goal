@@ -31,6 +31,21 @@ def data_cutoff(c, season, week) -> str | None:
     return r[0] if r else None
 
 
+def _top_end(c: sqlite3.Connection, model: str, season: int, week: int) -> models.TopEnd:
+    """TopEnd fit on the latest walk-forward run's raw out-of-sample chances (stored as score) from earlier weeks."""
+    top = models.TopEnd()
+    run = c.execute("SELECT run_id FROM model_runs WHERE kind='walk_forward' ORDER BY created_at DESC LIMIT 1").fetchone()
+    if not models.TOP_END_KNOT or run is None:
+        return top
+    h = pd.read_sql_query("SELECT b.season, b.week, b.score, b.outcome FROM backtest_preds b JOIN player_game g ON g.season=b.season "
+                          "AND g.week=b.week AND g.player_id=b.player_id AND g.team=b.team AND g.participated=1 "
+                          "WHERE b.run_id=? AND b.model=? AND b.outcome IS NOT NULL AND (b.season<? OR (b.season=? AND b.week<?))",
+                          c, params=(run[0], model, season, season, week))
+    if h[["season", "week"]].drop_duplicates().shape[0] >= models.TOP_END_MIN_WEEKS:
+        top.fit(h.score.to_numpy(float), h.outcome.to_numpy(int))
+    return top
+
+
 def predict_week(c: sqlite3.Connection, feats: pd.DataFrame, season: int, week: int, gate: dict | None, log=print) -> dict:
     labeled = feats[(feats.participated == 1) & (feats.has_history == 1) & feats.scored_anytime.notna()
                     & feats.position.isin(POSITIONS)].copy()
@@ -51,6 +66,10 @@ def predict_week(c: sqlite3.Connection, feats: pd.DataFrame, season: int, week: 
         rank_col = "p_model"
         version = promoted
         params = model.params()
+        top = _top_end(c, promoted, season, week)
+        if top.coef is not None:
+            rows["p_model"] = top.predict(rows.p_model.to_numpy(float))
+            params = {**params, "top_end": {"knot": top.knot, "coef": top.coef}}
     else:
         rows["p_model"] = np.nan  # never shown: model not validated
         rank_col = "lam"

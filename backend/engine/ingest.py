@@ -15,6 +15,7 @@ Ported from the handoff `nfl_full_pbp_engine.py` with these corrections:
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 import ssl
 import time
@@ -24,7 +25,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import sources
-from .util import csv_reader, file_mtime_iso, nint, number, sha256_file, utcnow, value, yes
+from .util import csv_reader, file_mtime_iso, nint, number, sha256_file, team, utcnow, value, yes
 
 USER_AGENT = "FourthAndGoalAnalytics/1.0 (+nflverse CC-BY-4.0)"
 OFFENSE_POS = ("QB", "RB", "WR", "TE", "FB")
@@ -33,7 +34,10 @@ Log = Callable[[str], None]
 
 # --------------------------------------------------------------------------- download
 def _ssl_context():
-    """Use certifi's CA bundle when present (python.org macOS builds ship without system certs)."""
+    """Use certifi's CA bundle when present (python.org macOS builds ship without system certs).
+    SSL_CERT_FILE, when set (for example behind a corporate proxy), takes precedence."""
+    if os.environ.get("SSL_CERT_FILE"):
+        return ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])
     try:
         import certifi  # noqa: PLC0415
 
@@ -124,7 +128,7 @@ def parse_pbp(row: dict, season: int, max_week: int | None = None, embargo_seaso
     play = value(row, "play_id")
     if not game or not play:
         return None
-    return (season, week, game, play, value(row, "posteam"), value(row, "defteam"), kind,
+    return (season, week, game, play, team(row, "posteam"), team(row, "defteam"), kind,
             pid if pid else "NAME:" + player, player, pos, d, air, complete, td, ez,
             1 if yes(row.get("qb_scramble")) else 0, value(row, "desc"))
 
@@ -142,7 +146,7 @@ def parse_player_stats(row: dict, season: int, max_week: int | None = None, emba
     if not pid or pos not in OFFENSE_POS:
         return None
     return (season, week, value(row, "game_id"), pid, value(row, "player_display_name", "player_name"), pos,
-            value(row, "team", "recent_team"), value(row, "opponent_team", "opponent"),
+            team(row, "team", "recent_team"), team(row, "opponent_team", "opponent"),
             nint(value(row, "carries", "rushing_attempts")), nint(row.get("targets")), nint(row.get("receptions")),
             nint(row.get("rushing_tds")), nint(row.get("receiving_tds")), nint(row.get("passing_tds")),
             number(row.get("rushing_yards"), 0.0), number(row.get("receiving_yards"), 0.0), value(row, "headshot_url"),
@@ -191,13 +195,13 @@ def import_pbp(c, path, season, max_week=None, embargo_season=None):
         if value(row, "season_type", "game_type") in ("REG", "") and value(row, "posteam") and value(row, "game_id"):
             week = nint(row.get("week"))
             if week and not (max_week is not None and (embargo_season is None or season == embargo_season) and week > max_week):
-                game, off = value(row, "game_id"), value(row, "posteam")
+                game, off = value(row, "game_id"), team(row, "posteam")
                 drive = value(row, "fixed_drive", "drive")
                 if drive:
                     key = (game, off, drive)
                     dr = drives.get(key)
                     if dr is None:
-                        dr = drives[key] = [season, week, game, off, value(row, "defteam"), drive, 0, 0, "", 0]
+                        dr = drives[key] = [season, week, game, off, team(row, "defteam"), drive, 0, 0, "", 0]
                     if value(row, "play_type") in ("pass", "run") and not yes(row.get("no_play")):
                         dr[6] += 1
                     if yes(row.get("drive_inside20")) or (number(row.get("yardline_100"), 99) <= 20 and value(row, "play_type") in ("pass", "run")):
@@ -233,12 +237,12 @@ def import_roster(c, path, season, max_week=None, embargo_season=None):
         if value(line, "game_type") not in ("REG", ""):
             return None
         week = nint(line.get("week"))
-        pid, team, pos = value(line, "gsis_id"), value(line, "team", "team_abbr"), value(line, "position")
-        if not week or not pid or not team or pos not in OFFENSE_POS:
+        pid, team_, pos = value(line, "gsis_id"), team(line, "team", "team_abbr"), value(line, "position")
+        if not week or not pid or not team_ or pos not in OFFENSE_POS:
             return None
         # Rosters for the upcoming week are pregame information, so no embargo here.
         return (season, week, pid, value(line, "full_name", "player_name", "football_name"), pos,
-                value(line, "depth_chart_position"), team, value(line, "status", "status_description_abbr"),
+                value(line, "depth_chart_position"), team_, value(line, "status", "status_description_abbr"),
                 value(line, "pfr_id"), value(line, "headshot_url"))
 
     return _stream(c, path, "roster_week", {"week", "gsis_id"}, parse)
@@ -254,7 +258,7 @@ def import_injuries(c, path, season, max_week=None, embargo_season=None):
         pid, pos = value(line, "gsis_id"), value(line, "position")
         if not week or not pid or pos not in OFFENSE_POS:
             return None
-        return (season, week, value(line, "team"), pid, value(line, "full_name"), pos,
+        return (season, week, team(line, "team"), pid, value(line, "full_name"), pos,
                 value(line, "report_status"), value(line, "practice_status"),
                 value(line, "report_primary_injury", "practice_primary_injury"))
 
@@ -272,14 +276,14 @@ def import_snaps(c, path, season, max_week=None, embargo_season=None):
             return None
         if max_week is not None and (embargo_season is None or season == embargo_season) and week > max_week:
             return None
-        return (season, week, value(line, "game_id"), value(line, "team"), value(line, "pfr_player_id"),
+        return (season, week, value(line, "game_id"), team(line, "team"), value(line, "pfr_player_id"),
                 value(line, "player"), value(line, "position"), nint(line.get("offense_snaps")),
                 number(line.get("offense_pct"), 0.0))
 
     return _stream(c, path, "snaps", {"game_id", "pfr_player_id", "offense_snaps"}, parse)
 
 
-def import_schedules(c, path, season=0, max_week=None, embargo_season=None, min_season=2023):
+def import_schedules(c, path, season=0, max_week=None, embargo_season=None, min_season=2010):
     c.execute("DELETE FROM games")
 
     def parse(line):
@@ -287,7 +291,7 @@ def import_schedules(c, path, season=0, max_week=None, embargo_season=None, min_
         if s < min_season or value(line, "game_type") != "REG":
             return None
         return (value(line, "game_id"), s, "REG", nint(line.get("week")), value(line, "gameday"),
-                value(line, "gametime"), value(line, "away_team"), value(line, "home_team"),
+                value(line, "gametime"), team(line, "away_team"), team(line, "home_team"),
                 None if number(line.get("away_score")) is None else nint(line.get("away_score")),
                 None if number(line.get("home_score")) is None else nint(line.get("home_score")),
                 number(line.get("spread_line")), number(line.get("total_line")), value(line, "roof"))

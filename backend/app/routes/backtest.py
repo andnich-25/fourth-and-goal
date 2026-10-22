@@ -4,6 +4,8 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, Query
 
+from engine.backtest import wilson
+
 from ..core import get_db, latest_walk_forward, loads
 
 router = APIRouter(prefix="/api/backtest", tags=["backtest"])
@@ -88,3 +90,52 @@ def tuning():
             "stage_b": [{k: v for k, v in x.items() if k in ("added", "accepted", "log_loss", "previous", "all_trials")} for x in r["stage_b"]],
             "c_grid": [{"C": x["C"], "log_loss": x["log_loss"]} for x in r["c_grid"]], "tuned": r["tuned"],
             "comparison": r["comparison"], "adopt": r["adopt"]}
+
+
+# Confidence tiers: plain-language bands with the hit rate of every past walk-forward pick in that band.
+TD_TIERS = [("Strong", 0.50, 1.01), ("Solid", 0.35, 0.50), ("Lean", 0.20, 0.35), ("Long shot", 0.0, 0.20)]
+PROP_TIERS = [("Strong", 0.65, 1.01), ("Solid", 0.58, 0.65), ("Lean", 0.53, 0.58), ("Coin flip", 0.0, 0.53)]
+
+
+def _tiers(p, y, bands):
+    out = []
+    for name, lo, hi in bands:
+        m = (p >= lo) & (p < hi)
+        n, k = int(m.sum()), int(y[m].sum())
+        out.append({"tier": name, "lo": lo, "hi": min(hi, 1.0), "n": n, "hits": k, "rate": k / n if n else None,
+                    "avg_chance": float(p[m].mean()) if n else None, "ci": wilson(k, n)})
+    return out
+
+
+@router.get("/confidence")
+def confidence(c: sqlite3.Connection = Depends(get_db)):
+    import numpy as np  # noqa: PLC0415
+    import pandas as pd  # noqa: PLC0415
+
+    from engine import props  # noqa: PLC0415
+
+    wf = latest_walk_forward(c)
+    out = {"td": None, "props": None}
+    if wf and wf["model_version"] not in (None, "none"):
+        bp = pd.read_sql_query("SELECT season, week, p, outcome FROM backtest_preds WHERE run_id=? AND model=? AND pregame_eligible=1 "
+                               "AND outcome IS NOT NULL", c, params=(wf["run_id"], wf["model_version"]))
+        if len(bp):
+            out["td"] = {"model": wf["model_version"], "weeks": int(bp[["season", "week"]].drop_duplicates().shape[0]),
+                         "first_season": int(bp.season.min()), "tiers": _tiers(bp.p.to_numpy(), bp.outcome.to_numpy(), TD_TIERS)}
+    rep = props.latest_report(c)
+    if rep:
+        parts = []
+        for market, r in rep["markets"].items():
+            model = r["gate"]["promoted"]
+            if model:
+                parts.append(pd.read_sql_query("SELECT season, week, p_over, (actual > line) AS y FROM prop_backtest WHERE run_id=? AND market=? "
+                                               "AND model=? AND actual IS NOT NULL", c, params=(rep["run_id"], market, model)))
+        if parts:
+            pb = pd.concat(parts)
+            side_p = np.maximum(pb.p_over, 1 - pb.p_over).to_numpy()
+            hit = np.where(pb.p_over >= 0.5, pb.y, 1 - pb.y)
+            out["props"] = {"weeks": int(pb[["season", "week"]].drop_duplicates().shape[0]), "first_season": int(pb.season.min()),
+                            "tiers": _tiers(side_p, hit, PROP_TIERS),
+                            "note": "Prop tiers use the side the model favored at a reference line (the player's recent median), "
+                                    "because past sportsbook lines are not available."}
+    return out

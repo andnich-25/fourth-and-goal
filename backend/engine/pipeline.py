@@ -41,7 +41,7 @@ def run_build(c, season=2026, log=print) -> dict:
     xr = aggregates.build_xtd(c, log)
     n_pg = aggregates.build_player_game(c, log)
     td = aggregates.build_team_and_defense(c, log)
-    seasons = [s for s in range(season - 2, season + 1)]
+    seasons = list(range(sources.history_start(season) + 1, season + 1))
     wk = status.current_week(c, season)
     targets = features.build_targets(c, seasons, extra_weeks=[(season, wk)] if wk else None)
     feats = features.compute_features(c, targets)
@@ -61,10 +61,17 @@ def load_features() -> pd.DataFrame:
         return pickle.load(f)["frame"]
 
 
+def test_weeks(c, season: int) -> list[tuple[int, int]]:
+    """Every regular-season week from TEST_SEASONS back through the last completed week of this season."""
+    wk = status.current_week(c, season) or 19
+    rows = c.execute("SELECT DISTINCT season, week FROM games WHERE season BETWEEN ? AND ? AND home_score IS NOT NULL "
+                     "ORDER BY season, week", (season - sources.TEST_SEASONS, season)).fetchall()
+    return [(s, w) for s, w in rows if s < season or w < wk]
+
+
 def run_backtest(c, season=2026, log=print) -> dict:
     feats = load_features()
-    wk = status.current_week(c, season) or 19
-    test = [(season - 1, w) for w in range(1, 19)] + [(season, w) for w in range(1, wk)]
+    test = test_weeks(c, season)
     have = set(zip(feats.season, feats.week))
     test = [t for t in test if t in have]
     return backtest.walk_forward(c, feats, test, log)
@@ -94,7 +101,7 @@ def run_props(c, season=2026, log=print) -> dict:
     feats = load_features()
     wk = status.current_week(c, season)
     frame = props.build_frame(c, props.upcoming_rows(feats, season, wk) if wk else None)
-    test = [(season - 1, w) for w in range(1, 19)] + [(season, w) for w in range(1, wk or 19)]
+    test = test_weeks(c, season)
     have = set(zip(frame[frame.labelled == 1].season, frame[frame.labelled == 1].week))
     rep = props.walk_forward(c, frame, [t for t in test if t in have], log=log)
     out = {"walk_forward": rep["run_id"], "promoted": {m: r["gate"]["promoted"] for m, r in rep["markets"].items()}}
