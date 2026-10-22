@@ -8,7 +8,7 @@ import { feedLine, useFeed } from "@/lib/feed";
 import { MARKET_GROUPS, pOver, type PropDist } from "@/lib/props";
 import { useLinkSuffix, useSeasonWeek } from "@/lib/state";
 import { PageTitle } from "@/components/Layout";
-import { Badge, Card, CardBody, ErrorState, Input, LoadingBlock, PosBadge, Segmented, Select, TableWrap, Td, TeamBadge, Th } from "@/components/ui";
+import { Badge, Card, CardBody, ErrorState, Input, LoadingBlock, Segmented, Select, TableWrap, Td, Th } from "@/components/ui";
 import { Flags, NoDataState, TierBadge } from "@/components/shared";
 import { useConfidence, tierFor } from "@/lib/confidence";
 import { estimatedLine, overReasons, PLAYABLE_NOTE, underReasons, type Recent } from "@/lib/ask";
@@ -110,7 +110,6 @@ function ScoreGuide() {
 }
 
 type SortKey = "chance" | "hits" | "projection" | "name";
-const SORT_NOTE: Record<SortKey, string> = { chance: "best hit chance first", hits: "best recent hit rate at the line first (last 8)", projection: "highest projection first", name: "A to Z" };
 
 const lc = (x: string) => x.toLowerCase();
 
@@ -171,24 +170,15 @@ export default function PropsPage() {
     <div className="space-y-5">
       <PageTitle kicker={`${season} · Week ${week}`} title="Player props" />
 
-      {m && (
-        <details className="card group">
-          <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm sm:px-5">
-            <span><span className="font-medium">How to read this page</span><span className="text-muted"> · how accurate {lc(m.label)} picks have been</span></span>
-            <ChevronDown className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" />
-          </summary>
-          <div className="space-y-4 border-t border-line p-3 sm:p-4"><MarketCard m={m} />{m.validated && <ScoreGuide />}</div>
-        </details>
-      )}
 
       {q.isError && <Card><ErrorState error={q.error} onRetry={() => q.refetch()} /></Card>}
       {q.isLoading && <Card><LoadingBlock rows={6} className="p-5" /></Card>}
       {d && !d.run_id && <Card><NoDataState reason={d.empty_reason} /></Card>}
       {d?.run_id && (
         <Card>
-          <div className="flex flex-wrap items-center gap-3 border-b border-line p-3 sm:p-4">
-            <label className="flex items-center gap-2 text-sm font-medium">Prop
-            <Select aria-label="Market" value={market} onChange={(e) => { setMarket(e.target.value); setOpen(null); }} className="h-9 w-52 font-medium">
+          <div className="grid grid-cols-2 items-center gap-2 border-b border-line p-2.5 sm:flex sm:flex-wrap sm:gap-3 sm:p-4">
+            <label className="flex min-w-0 items-center gap-2 text-sm font-medium"><span className="hidden sm:inline">Prop</span>
+            <Select aria-label="Market" value={market} onChange={(e) => { setMarket(e.target.value); setOpen(null); }} className="h-9 w-full font-medium sm:w-52">
               {MARKET_GROUPS.map((g) => (
                 <optgroup key={g.label} label={g.label}>
                   {g.markets.map((k) => {
@@ -199,22 +189,25 @@ export default function PropsPage() {
               ))}
             </Select>
             </label>
-            <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+            <Select aria-label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="h-9 w-full text-xs sm:order-last sm:w-44">
+              <option value="chance">Sort: best hit chance</option><option value="hits">Sort: recent hit rate</option>
+              <option value="projection">Sort: projection</option><option value="name">Sort: name</option></Select>
+            <div className="relative col-span-2 min-w-0 flex-1 sm:max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted" aria-hidden />
               <Input aria-label="Search players" placeholder="Search players" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
             </div>
-            {m?.validated && <Segmented size="sm" label="Show" value={show} onChange={setShow}
-              options={[{ value: "all", label: "All" }, { value: "under", label: "Leaning under" }, { value: "over", label: "Leaning over" }]} />}
-            <Select aria-label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="h-8 w-44 text-xs">
-              <option value="chance">Sort: best hit chance</option><option value="hits">Sort: recent hit rate</option>
-              <option value="projection">Sort: projection</option><option value="name">Sort: name</option></Select>
-            <span className="text-sm text-muted">{view.length} players · {m?.validated ? SORT_NOTE[sort] : "research projections only"}{hidden ? ` · ${hidden} backups and inactive players hidden (search a name to see one)` : ""}</span>
+            {m?.validated && <div className="col-span-2 flex items-center justify-between gap-2 sm:contents">
+              <Segmented size="sm" label="Show" value={show} onChange={setShow}
+                options={[{ value: "all", label: "All" }, { value: "under", label: "Unders" }, { value: "over", label: "Overs" }]} />
+              <span className="text-xs text-muted sm:order-last" title={hidden ? `${hidden} backups and inactive players hidden; search a name to see one` : undefined}>{view.length} players</span>
+            </div>}
           </div>
           <TableWrap>
             <table className="w-full">
               <thead><tr>
-                <Th>Player</Th><Th>Opp</Th><Th className="text-right" title="Middle of the projected range: half of outcomes above, half below">Projection</Th>
-                <Th>{m?.label ?? "Line"} line</Th><Th title="Confidence out of 10 for each side. They add to 10; the bigger one is the lean.">Under · Over (out of 10)</Th><Th>Lean</Th>
+                <Th className="sticky left-0 z-10 bg-surface">Player</Th><Th title="The side we lean, how confident out of 10, and its tier">Lean</Th>
+                <Th>{m?.label ?? "Line"} line</Th><Th title="Confidence out of 10 for each side. They add to 10; the bigger one is the lean.">Under · Over</Th>
+                <Th className="text-right" title="Middle of the projected range: half of outcomes above, half below">Proj.</Th>
                 <Th title="Optional: American odds for the lean side. Filled with the best book price when prices are loaded.">Price</Th>
                 <Th className="text-right" title="Our chance of the lean side minus the book's implied chance (which includes the book's margin)">vs book</Th>
                 {hasActual && <Th className="text-right">Result</Th>}<Th />
@@ -225,24 +218,24 @@ export default function PropsPage() {
                   return (
                     <React.Fragment key={r.player_id}>
                       <tr className={cn("border-b border-line/60 hover:bg-raised/50", !r.eligible && "opacity-60")}>
-                        <Td>
-                          <div className="flex min-w-[170px] items-center gap-2">
-                            <TeamBadge team={r.team} /><PosBadge pos={r.position} />
-                            <div className="min-w-0">
-                              <Link to={`/players/${r.player_id}${suffix}`} className="block truncate font-medium hover:text-accent">{r.player_name}</Link>
-                              {r.exclusion && <span className="text-[11px] text-danger">{r.exclusion}</span>}
-                            </div>
+                        <Td className="sticky left-0 z-10 bg-surface">
+                          <div className="w-[118px] sm:w-[170px]">
+                            <Link to={`/players/${r.player_id}${suffix}`} className="block truncate font-medium hover:text-accent">{r.player_name}</Link>
+                            <div className="truncate text-[11px] text-muted">{r.team} {r.position} vs {r.opponent}</div>
+                            {r.exclusion && <span className="text-[11px] text-danger">{r.exclusion}</span>}
                           </div>
                         </Td>
-                        <Td className="text-muted">{r.opponent}</Td>
-                        <Td className="text-right font-semibold">{num(r.median, m?.kind === "count" ? 0 : 1)}</Td>
+                        <Td>{lean && over != null ? <div className="whitespace-nowrap">
+                          <div className="font-semibold">{lean === "under" ? "Under" : "Over"} {line}</div>
+                          <div className="flex items-center gap-1.5 text-xs"><span className="font-bold">{score(Math.max(over, 1 - over))}</span><span className="text-muted">/10</span>{r.eligible ? <TierBadge tier={tier} compact /> : null}</div>
+                        </div> : <span className="text-muted">—</span>}</Td>
                         <Td>
                           <Input aria-label={`Line for ${r.player_name}`} inputMode="decimal" placeholder={String(line)} value={typed.line ?? ""}
                             onChange={(e) => setLines({ ...lines, [k]: { ...typed, line: e.target.value } })} className="h-8 w-20" />
                           {source !== "yours" && <div className="mt-0.5 text-[10px] text-muted">{source === "book" ? "book line" : source === "projected" ? "projected line" : "usual line"}</div>}
                         </Td>
                         <Td>{over != null ? <ConfidenceSplit over={over} /> : r.dist ? <span className="text-muted">—</span> : <span className="text-xs text-muted" title="Not validated">hidden</span>}</Td>
-                        <Td>{lean ? <div className="flex items-center gap-1.5 whitespace-nowrap"><span className="font-semibold">{lean === "under" ? "Under" : "Over"} {line} <span className="font-normal">{propName}</span></span>{r.eligible ? <TierBadge tier={tier} compact /> : null}</div> : <span className="text-muted">—</span>}</Td>
+                        <Td className="text-right font-semibold">{num(r.median, m?.kind === "count" ? 0 : 1)}</Td>
                         <Td><Input aria-label={`Price for ${r.player_name}`} placeholder="-110" value={odds ?? ""} disabled={!lean}
                           onChange={(e) => setLines({ ...lines, [k]: { ...typed, odds: e.target.value } })} className="h-8 w-20" /></Td>
                         <Td className={cn("text-right", edge != null && (edge > 0 ? "text-accent" : "text-danger"))}>{edge != null ? `${edge > 0 ? "+" : ""}${Math.round(edge * 100)} pts` : <span className="text-muted">—</span>}</Td>
@@ -281,6 +274,15 @@ export default function PropsPage() {
             </table>
           </TableWrap>
         </Card>
+      )}
+      {m && (
+        <details className="card group">
+          <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm sm:px-5">
+            <span><span className="font-medium">How to read this page</span><span className="text-muted"> · how accurate {lc(m.label)} picks have been</span></span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="space-y-4 border-t border-line p-3 sm:p-4"><MarketCard m={m} />{m.validated && <ScoreGuide />}</div>
+        </details>
       )}
       {d?.note && <p className="text-xs text-muted">{d.note}</p>}
     </div>
