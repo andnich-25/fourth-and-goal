@@ -17,7 +17,7 @@ export default function SettingsPage() {
       <Card>
         <CardHeader title="About" />
         <CardBody className="space-y-2 text-sm text-muted">
-          <p>Fourth &amp; Goal Analytics is a local-first research tool. It is not a wagering platform and never labels a pick as guaranteed. If you bet, set limits in advance and never raise stakes to chase losses.</p>
+          <p>The Lab is a local-first research tool. It is not a wagering platform and never labels a pick as guaranteed. If you bet, set limits in advance and never raise stakes to chase losses.</p>
           <p>Times display in Central time (America/Chicago); stored timestamps are ISO 8601 UTC. <Badge>v1.0.0</Badge></p>
         </CardBody>
       </Card>

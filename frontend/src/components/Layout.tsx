@@ -43,13 +43,14 @@ export function Logo({ compact = false }: { compact?: boolean }) {
     <div className="flex items-center gap-2.5">
       <svg viewBox="0 0 32 32" className="h-8 w-8 shrink-0" aria-hidden>
         <rect width="32" height="32" rx="8" className="fill-raised" />
-        <path d="M9 23V9h10M9 16h7" className="stroke-accent" strokeWidth="3" fill="none" strokeLinecap="round" />
-        <circle cx="23" cy="22" r="2.5" className="fill-accent" />
+        {/* Lab flask: neck, body and the liquid line */}
+        <path d="M13 7h6M14 7v6.5L8.6 22.8A2 2 0 0 0 10.3 26h11.4a2 2 0 0 0 1.7-3.2L18 13.5V7" className="stroke-accent" strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M11.2 19.5h9.6l2 3.4a1 1 0 0 1-.9 1.6H10.1a1 1 0 0 1-.9-1.6z" className="fill-accent" />
       </svg>
       {!compact && (
         <div className="leading-tight">
-          <div className="font-display text-[15px] font-bold tracking-tight">Fourth &amp; Goal</div>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">Analytics</div>
+          <div className="font-display text-[15px] font-bold tracking-tight">The Lab</div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">Props · Sims · Data</div>
         </div>
       )}
     </div>
