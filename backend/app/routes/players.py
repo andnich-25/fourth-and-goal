@@ -17,7 +17,12 @@ def player(player_id: str, season: int | None = None, week: int | None = None, c
     season, week = season or ds, week or dw
     ident = c.execute("""SELECT player_id, player_name, position, team, depth_position, status, headshot_url FROM roster_week
                          WHERE player_id=? AND season=? ORDER BY week DESC LIMIT 1""", (player_id, season)).fetchone()
-    games = [dict(r) for r in c.execute("""SELECT * FROM player_game WHERE player_id=? AND season=? AND week<? ORDER BY week""",
+    # Box-score yardage (player_week) next to the opportunity counts, for the prop markets.
+    games = [dict(r) for r in c.execute("""SELECT g.*, w.attempts, w.completions, w.pass_yards, w.pass_tds, w.interceptions,
+                                                  w.rush_yards, w.rec_yards
+                                           FROM player_game g LEFT JOIN player_week w
+                                             ON w.season=g.season AND w.week=g.week AND w.player_id=g.player_id AND w.team=g.team
+                                           WHERE g.player_id=? AND g.season=? AND g.week<? ORDER BY g.week""",
                                         (player_id, season, week))]
     if not ident and not games:
         any_row = c.execute("SELECT player_name, position, team FROM player_game WHERE player_id=? ORDER BY season DESC, week DESC LIMIT 1",

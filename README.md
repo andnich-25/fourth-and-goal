@@ -1,4 +1,4 @@
-# Fourth & Goal Analytics
+# The Lab (formerly Fourth & Goal Analytics)
 
 A local-first NFL anytime-touchdown research app. It ranks every eligible QB, RB, WR and TE for the week using transparent opportunity evidence, explores all 32 defenses, keeps an auditable Top 3 shortlist with immutable pregame locks, and shows a chronologically correct walk-forward backtest. Probabilities appear only after a model has beaten baselines on unseen weeks.
 

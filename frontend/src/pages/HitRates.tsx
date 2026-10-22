@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Percent } from "lucide-react";
-import { answerHitRates } from "@/lib/ask";
+import { answerHitRates, type Pick } from "@/lib/ask";
 import { useLinkSuffix, useSeasonWeek } from "@/lib/state";
 import { PageTitle } from "@/components/Layout";
 import { Card, CardBody, CardHeader, Input, LoadingBlock, Notice, Segmented, Select } from "@/components/ui";
@@ -18,8 +18,17 @@ export default function HitRatesPage() {
   const [market, setMarket] = React.useState("all");
   const [pos, setPos] = React.useState("All");
   const [team, setTeam] = React.useState("");
+  const [sort, setSort] = React.useState<"chance" | "hits">("chance");
   const a = React.useMemo(() => data ? answerHitRates(data, 300, { position: pos === "All" ? undefined : pos, teams: team ? [team.toUpperCase()] : undefined },
     { threshold, window: win, side, markets: market === "all" ? undefined : [market] }) : null, [data, threshold, win, side, market, pos, team]);
+  // The answer lists the best model chance first; the other sorts re-rank the same picks.
+  const hitRate = (p: Pick) => {
+    const rec = (p.recent ?? []).slice(0, win);
+    return rec.length && p.line != null ? rec.filter((g) => (p.side === "over" ? g.value > p.line! : g.value < p.line!)).length / rec.length : 0;
+  };
+  const picks = a?.picks && sort !== "chance"
+    ? [...a.picks].sort((x, y) => hitRate(y) - hitRate(x) || y.p - x.p)
+    : a?.picks;
   return (
     <div className="space-y-5">
       <PageTitle kicker={`${season} · Week ${week}`} title="Hit rates" />
@@ -28,7 +37,7 @@ export default function HitRatesPage() {
         model chance beside it. A perfect recent record is not a sure thing, so lean on the model's chance and its tier. Open any player on the Player props page to see every line.
       </Notice>
       <Card>
-        <CardHeader icon={<Percent className="h-4 w-4 text-accent" />} title={a?.title ?? "Hit rates"} subtitle={a?.picks ? `${a.picks.length} props, highest model chance first` : undefined} />
+        <CardHeader icon={<Percent className="h-4 w-4 text-accent" />} title={a?.title ?? "Hit rates"} subtitle={a?.picks ? `${a.picks.length} props, ${sort === "chance" ? "best hit chance first" : "best recent hit rate first"}` : undefined} />
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2 sm:px-5">
           <Segmented size="sm" label="Hit rate" value={threshold} onChange={setThreshold} options={[1, 0.9, 0.8, 0.7].map((x) => ({ value: x, label: `${Math.round(x * 100)}%` }))} />
           <Segmented size="sm" label="Games" value={win} onChange={setWin} options={[5, 8, 16].map((x) => ({ value: x, label: `Last ${x}` }))} />
@@ -38,9 +47,11 @@ export default function HitRatesPage() {
             {Object.entries(data?.props ?? {}).map(([m, v]) => <option key={m} value={m}>{v.label}</option>)}
           </Select>
           <Segmented size="sm" label="Position" value={pos} onChange={setPos} options={POSITIONS.map((x) => ({ value: x, label: x }))} />
+          <Select aria-label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as "chance" | "hits")} className="h-8 w-44 text-xs">
+            <option value="chance">Sort: best hit chance</option><option value="hits">Sort: recent hit rate</option></Select>
           <Input aria-label="Team" placeholder="Team (e.g. DET)" value={team} onChange={(e) => setTeam(e.target.value.slice(0, 3))} className="h-8 w-32 text-xs" />
         </div>
-        {!data ? <LoadingBlock rows={6} className="p-5" /> : a?.picks?.length ? <PickList picks={a.picks} suffix={suffix} />
+        {!data ? <LoadingBlock rows={6} className="p-5" /> : picks?.length ? <PickList picks={picks} suffix={suffix} />
           : <CardBody className="text-sm text-muted">{a?.summary ?? "Nothing matches."}</CardBody>}
       </Card>
     </div>

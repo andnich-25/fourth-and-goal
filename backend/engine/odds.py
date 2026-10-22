@@ -35,6 +35,16 @@ MARKETS = {
     "rush_yards": "player_rush_yds",
 }
 # Six markets keep the weekly fetch inside the free plan; these are the most widely offered player props.
+# Alternate lines (every line a book offers, e.g. 180+ passing yards at -1040) cost one more credit per market per game,
+# which the free plan cannot carry, so they are fetched only when the key's monthly allowance shows a paid plan (or
+# FG_ODDS_ALT=always). Their rows carry alt=True; hit rates then use only lines a book actually offers.
+ALT_MARKETS = {
+    "pass_yards": "player_pass_yds_alternate",
+    "rush_yards": "player_rush_yds_alternate",
+    "rec_yards": "player_reception_yds_alternate",
+    "receptions": "player_receptions_alternate",
+}
+PAID_PLAN_MIN = 1000  # monthly allowance above this means a paid plan
 BOOKS = {"draftkings": "DraftKings", "fanduel": "FanDuel", "betmgm": "BetMGM", "williamhill_us": "Caesars", "espnbet": "ESPN BET",
          "fanatics": "Fanatics", "betrivers": "BetRivers", "ballybet": "Bally Bet", "hardrockbet": "Hard Rock", "betonlineag": "BetOnline",
          "bovada": "Bovada", "mybookieag": "MyBookie", "betus": "BetUS", "lowvig": "LowVig"}
@@ -130,13 +140,18 @@ def fetch(c: sqlite3.Connection, season: int, week: int, key: str, log=print) ->
     by_teams = {(g["home_team"], g["away_team"]): g for g in games if g["home_score"] is None}
     events, hdr = _get(f"{API}/events", {"apiKey": key})
     remaining = hdr.get("x-requests-remaining")
+    allowance = float(remaining or 0) + float(hdr.get("x-requests-used") or 0)
+    mode = os.environ.get("FG_ODDS_ALT", "auto").lower()
+    want_alt = mode == "always" or (mode == "auto" and allowance > PAID_PLAN_MIN)
+    markets = {**MARKETS, **({f"{k}_alt": v for k, v in ALT_MARKETS.items()} if want_alt else {})}
     todo = []
     for e in events:  # type: ignore[union-attr]
         h, a = TEAMS.get(e["home_team"]), TEAMS.get(e["away_team"])
         if (h, a) in by_teams:
             todo.append((e, by_teams[(h, a)]))
-    cost = len(todo) * len(MARKETS)
-    log(f"odds: {len(todo)} upcoming games matched, about {cost} credits needed, {remaining} remaining")
+    cost = len(todo) * len(markets)
+    log(f"odds: {len(todo)} upcoming games matched, about {cost} credits needed, {remaining} remaining"
+        f"{'' if want_alt else ' (alternate lines skipped: free plan)'}")
     if remaining is not None and float(remaining) < cost:
         raise RuntimeError(f"Not enough Odds API credits left this month ({remaining} < {cost}); keeping the previous snapshot.")
     players = _players(c, season, week)
@@ -145,19 +160,21 @@ def fetch(c: sqlite3.Connection, season: int, week: int, key: str, log=print) ->
     for e, g in todo:
         try:
             data, hdr = _get(f"{API}/events/{e['id']}/odds", {"apiKey": key, "regions": "us", "oddsFormat": "american",
-                                                              "markets": ",".join(MARKETS.values())})
+                                                              "markets": ",".join(markets.values())})
         except urllib.error.HTTPError as ex:
             errors.append(f"{g['game_id']}: HTTP {ex.code}")
             log(f"odds: {g['game_id']} HTTP {ex.code} {ex.read()[:200]!r}")
             continue
         remaining = hdr.get("x-requests-remaining", remaining)
-        feed_to_ours = {v: k for k, v in MARKETS.items()}
+        feed_to_ours = {v: k for k, v in markets.items()}
         for b in data.get("bookmakers", []):  # type: ignore[union-attr]
             book = BOOKS.get(b["key"], b.get("title", b["key"]))
             for m in b.get("markets", []):
                 market = feed_to_ours.get(m["key"])
                 if not market:
                     continue
+                alt = market.endswith("_alt")
+                market = market.removesuffix("_alt")
                 for o in m.get("outcomes", []):
                     name = o.get("description") or ""
                     side = {"over": "over", "under": "under", "yes": "yes"}.get(str(o.get("name", "")).lower())
@@ -178,9 +195,9 @@ def fetch(c: sqlite3.Connection, season: int, week: int, key: str, log=print) ->
                         mp = None
                     rows.append({"model_p": None if mp is None else round(float(mp), 4),"game_id": g["game_id"], "market": market, "player_id": hit[0], "player_name": hit[1], "team": team,
                                  "book": book, "side": side, "line": o.get("point"), "price": int(o["price"]),
-                                 "updated": m.get("last_update") or b.get("last_update")})
+                                 "updated": m.get("last_update") or b.get("last_update"), **({"alt": True} if alt else {})})
     snap = {"season": season, "week": week, "fetched_at": utcnow(), "source": "The Odds API (the-odds-api.com), US books",
-            "games": len(todo), "rows": rows, "unmatched_names": len(unmatched), "errors": errors, "credits_remaining": remaining}
+            "games": len(todo), "alt_lines": want_alt, "rows": rows, "unmatched_names": len(unmatched), "errors": errors, "credits_remaining": remaining}
     if not rows and errors:
         raise RuntimeError("The odds feed returned errors for every game (player props may not be included on this plan): "
                            + "; ".join(errors[:3]))
@@ -203,7 +220,7 @@ def record(c: sqlite3.Connection, min_edge: float = 0.03) -> dict:
     import pandas as pd  # noqa: PLC0415
 
     snaps = [json.loads(p.read_text()) for p in sorted(odds_dir().glob("*.json"))] if odds_dir().exists() else []
-    rows = [dict(r, season=s["season"], week=s["week"]) for s in snaps for r in s["rows"] if r.get("model_p") is not None]
+    rows = [dict(r, season=s["season"], week=s["week"]) for s in snaps for r in s["rows"] if r.get("model_p") is not None and not r.get("alt")]
     if not rows:
         return {"weeks": 0, "picks": 0, "empty_reason": "No graded price snapshots yet. The record starts with the first weekly price pull."}
     df = pd.DataFrame(rows)

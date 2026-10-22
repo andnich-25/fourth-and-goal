@@ -11,9 +11,9 @@ import { PageTitle } from "@/components/Layout";
 import { Badge, Card, CardBody, ErrorState, Input, LoadingBlock, PosBadge, Segmented, Select, TableWrap, Td, TeamBadge, Th } from "@/components/ui";
 import { Flags, NoDataState, TierBadge } from "@/components/shared";
 import { useConfidence, tierFor } from "@/lib/confidence";
-import { overReasons, underReasons, usualLine, type Recent } from "@/lib/ask";
+import { estimatedLine, overReasons, PLAYABLE_NOTE, underReasons, type Recent } from "@/lib/ask";
 import { likelyToPlay, starterQbs } from "@/lib/playing";
-import { ladder } from "@/lib/hitrates";
+import { ladder, playable, type Playable } from "@/lib/hitrates";
 
 export type MarketMeta = {
   market: string; label: string; positions: string[]; kind: string; validated: boolean; model: string | null; tested: boolean;
@@ -88,7 +88,7 @@ function ScoreGuide() {
           <div className="font-semibold">How to read the confidence scores</div>
           <p className="mt-1 text-sm text-muted">Each player gets an <b className="text-fg">Under</b> score and an <b className="text-fg">Over</b> score out of 10 for the line shown.
             The score is the model's chance of that side, so an 8.7 under is an 87% chance and the over is 1.3. The two always add to 10. The bigger number is the lean and is highlighted.
-            The line is the book line when one is loaded, otherwise the player's usual line (his recent median, rounded to a half point), and you can type your own.</p>
+            The line is the book line when one is loaded, otherwise the player's usual line (his recent median, rounded to a half point), or this week's projection when his recent games came in a different role, and you can type your own.</p>
         </div>
         {p && (
           <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
@@ -109,12 +109,16 @@ function ScoreGuide() {
   );
 }
 
+type SortKey = "chance" | "hits" | "projection" | "name";
+const SORT_NOTE: Record<SortKey, string> = { chance: "best hit chance first", hits: "best recent hit rate at the line first (last 8)", projection: "highest projection first", name: "A to Z" };
+
 export default function PropsPage() {
   const { season, week } = useSeasonWeek();
   const suffix = useLinkSuffix();
   const [market, setMarket] = React.useState("receptions");
   const [search, setSearch] = React.useState("");
   const [show, setShow] = React.useState<Show>("all");
+  const [sort, setSort] = React.useState<SortKey>("chance");
   const [open, setOpen] = React.useState<string | null>(null);
   const [lines, setLines] = React.useState<Lines>(loadLines);
   React.useEffect(() => { try { localStorage.setItem(LINES_KEY, JSON.stringify(lines)); } catch { /* ignore */ } }, [lines]);
@@ -135,9 +139,9 @@ export default function PropsPage() {
   const view = (d?.rows ?? []).filter((r) => (search ? r.player_name.toLowerCase().includes(search.toLowerCase()) : playing(r))).map((r) => {
     const typed = lines[key(r)] ?? {};
     const fl = feedLine(feed, market, r.player_id);
-    const usual = usualLine(r, market) ?? Math.floor(r.median) + 0.5;
-    const line = typed.line != null && typed.line !== "" ? Number(typed.line) : fl ?? usual;
-    const source = typed.line ? "yours" : fl != null ? "book" : "usual";
+    const est = estimatedLine(r, market);
+    const line = typed.line != null && typed.line !== "" ? Number(typed.line) : fl ?? est.line;
+    const source = typed.line ? "yours" : fl != null ? "book" : est.kind;
     const over = r.dist && Number.isFinite(line) ? pOver(r.dist, line) : null;
     const lean: "over" | "under" | null = over == null ? null : over > 0.5 ? "over" : "under";
     const leanP = over == null ? null : Math.max(over, 1 - over);
@@ -149,9 +153,15 @@ export default function PropsPage() {
     const edge = leanP != null && implied != null ? leanP - implied : null;
     const label = m?.label ?? market;
     const reasons = lean && Number.isFinite(line) ? (lean === "under" ? underReasons : overReasons)(r, market, label, line) : [];
-    return { r, typed, line, source, over, lean, leanP, odds, edge, reasons, tier: tierFor(conf.data, "props", leanP) };
+    const rec = (r.recent ?? []).slice(0, 8);
+    const hitRate = lean && rec.length ? rec.filter((g) => (lean === "over" ? g.value > line : g.value < line)).length / rec.length : -1;
+    return { r, typed, line, source, over, lean, leanP, odds, edge, reasons, hitRate, tier: tierFor(conf.data, "props", leanP) };
   }).filter((v) => show === "all" || v.lean === show)
-    .sort((a, b) => Number(!!b.r.eligible) - Number(!!a.r.eligible) || (b.leanP ?? -1) - (a.leanP ?? -1) || b.r.median - a.r.median);
+    .sort((a, b) => Number(!!b.r.eligible) - Number(!!a.r.eligible) || (
+      sort === "hits" ? b.hitRate - a.hitRate || (b.leanP ?? -1) - (a.leanP ?? -1)
+        : sort === "projection" ? b.r.median - a.r.median
+          : sort === "name" ? a.r.player_name.localeCompare(b.r.player_name)
+            : (b.leanP ?? -1) - (a.leanP ?? -1) || b.r.median - a.r.median));
   const hasActual = d?.rows.some((x) => x.actual != null);
 
   return (
@@ -184,7 +194,10 @@ export default function PropsPage() {
             </div>
             {m?.validated && <Segmented size="sm" label="Show" value={show} onChange={setShow}
               options={[{ value: "all", label: "All" }, { value: "under", label: "Leaning under" }, { value: "over", label: "Leaning over" }]} />}
-            <span className="text-sm text-muted">{view.length} players · {m?.validated ? "strongest lean first" : "research projections only"}{hidden ? ` · ${hidden} backups and inactive players hidden (search a name to see one)` : ""}</span>
+            <Select aria-label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="h-8 w-44 text-xs">
+              <option value="chance">Sort: best hit chance</option><option value="hits">Sort: recent hit rate</option>
+              <option value="projection">Sort: projection</option><option value="name">Sort: name</option></Select>
+            <span className="text-sm text-muted">{view.length} players · {m?.validated ? SORT_NOTE[sort] : "research projections only"}{hidden ? ` · ${hidden} backups and inactive players hidden (search a name to see one)` : ""}</span>
           </div>
           <TableWrap>
             <table className="w-full">
@@ -217,7 +230,7 @@ export default function PropsPage() {
                         <Td>
                           <Input aria-label={`Line for ${r.player_name}`} inputMode="decimal" placeholder={String(line)} value={typed.line ?? ""}
                             onChange={(e) => setLines({ ...lines, [k]: { ...typed, line: e.target.value } })} className="h-8 w-20" />
-                          {source !== "yours" && <div className="mt-0.5 text-[10px] text-muted">{source === "book" ? "book line" : "usual line"}</div>}
+                          {source !== "yours" && <div className="mt-0.5 text-[10px] text-muted">{source === "book" ? "book line" : source === "projected" ? "projected line" : "usual line"}</div>}
                         </Td>
                         <Td>{over != null ? <ConfidenceSplit over={over} /> : r.dist ? <span className="text-muted">—</span> : <span className="text-xs text-muted" title="Not validated">hidden</span>}</Td>
                         <Td>{lean ? <div className="flex items-center gap-1.5 whitespace-nowrap"><span className="font-semibold">{lean === "under" ? "Under" : "Over"} {line}</span>{r.eligible ? <TierBadge tier={tier} compact /> : null}</div> : <span className="text-muted">—</span>}</Td>
@@ -239,7 +252,7 @@ export default function PropsPage() {
                                 : <p className="mt-1 text-sm text-muted">No single factor stands out; the lean comes from the model weighing everything below together.</p>}
                             </div>
                           )}
-                          {r.dist && <LineLadder r={r} line={line} />}
+                          {r.dist && <LineLadder r={r} line={line} pl={playable(feed, market, r)} />}
                           <div className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-4">
                             {Object.entries(r.evidence).map(([ek, v]) => (
                               <div key={ek} className="flex justify-between gap-3"><span className="text-muted">{evidenceLabel(ek, stat, m?.label ?? "")}</span><span className="font-medium">{evidenceValue(ek, v)}</span></div>
@@ -265,9 +278,9 @@ export default function PropsPage() {
 }
 
 /** Every line for one player: this week's chance and how often he cleared it recently. */
-function LineLadder({ r, line }: { r: PropRow; line: number }) {
+export function LineLadder({ r, line, pl }: { r: PropRow; line: number; pl: Playable }) {
   const [win, setWin] = React.useState(8);
-  const rungs = ladder(r, win);
+  const rungs = ladder(r, win, pl);
   if (!rungs.length) return null;
   const tone = (x: number) => (x >= 0.8 ? "text-accent font-semibold" : x <= 0.2 ? "text-danger" : "");
   return (
@@ -291,7 +304,8 @@ function LineLadder({ r, line }: { r: PropRow; line: number }) {
               </tr>);
           })}</tbody></table>
       </div>
-      <p className="mt-1 text-xs text-muted">Hit rates count games he played. The model's chance is this week's forecast and also weighs the matchup, role and game script.</p>
+      <p className="mt-1 text-xs text-muted">{pl.source === "book" ? "These are the lines the books post, alternate lines included." : PLAYABLE_NOTE}{" "}
+        Hit rates count games he played. The model's chance is this week's forecast and also weighs the matchup, role and game script.</p>
     </div>
   );
 }

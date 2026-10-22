@@ -20,7 +20,8 @@ on:
     types: [completed]
 
 permissions:
-  contents: read
+  contents: write   # saves the weekly pick log to the nfl-data branch
+
   pages: write
   id-token: write
 
@@ -46,6 +47,21 @@ jobs:
           path: site-data
           key: nfl-site-${{ github.run_id }}
           restore-keys: nfl-site-
+
+      # Every pick the site suggests is saved before kickoff and graded after the game (engine/picklog.py).
+      # The saved picks must survive between runs, so they live on the nfl-data branch.
+      - name: Check out the nfl-data branch (created on the first run)
+        if: env.NBA_ONLY != 'true' || steps.nflsite.outputs.cache-matched-key == ''
+        run: |
+          if git ls-remote --exit-code --heads origin nfl-data >/dev/null; then
+            git fetch --depth 1 origin nfl-data
+            git worktree add pick-archive origin/nfl-data
+          else
+            git worktree add --detach pick-archive
+            git -C pick-archive checkout --orphan nfl-data
+            git -C pick-archive rm -rfq .
+            printf '# NFL pick log\n\nWritten by the "Refresh data and publish site" workflow: picks/ holds every pick the site showed each week, frozen at kickoff.\n' > pick-archive/README.md
+          fi
 
       - uses: actions/setup-python@v5
         with:
@@ -90,7 +106,20 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           # Fetch prices on the Saturday run and on manual runs only (free plan: 500 credits a month).
           FG_ODDS_FETCH: ${{ github.event.schedule == '0 15 * * 6' || github.event_name == 'workflow_dispatch' }}
+          FG_PICKS_DIR: ${{ github.workspace }}/pick-archive/picks
         run: python -m engine.cli all --download
+
+      - name: Save the pick log to the nfl-data branch
+        if: env.NBA_ONLY != 'true' || steps.nflsite.outputs.cache-matched-key == ''
+        working-directory: pick-archive
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -qm "Pick log $(date -u +%F)"
+          for i in 1 2 3 4; do git push origin HEAD:nfl-data && exit 0; sleep $((2**i)); git pull --rebase -q origin nfl-data || true; done
+          exit 1
 
       - name: Check engine invariants
         if: env.NBA_ONLY != 'true' || steps.nflsite.outputs.cache-matched-key == ''

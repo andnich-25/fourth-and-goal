@@ -60,7 +60,7 @@ export default function HowPage() {
             <Term name="Confidence out of 10">On the props page each player gets an under score and an over score for the line. The score is the chance times 10, so 8.7 under means an 87% chance and the over is 1.3. They always add to 10, and the bigger one is the lean.</Term>
             <Term name="Confidence tier">Strong, Solid, Lean or Long shot / Coin flip. A plain grouping of the chance, with the real hit rate for that group shown beside it.</Term>
             <Term name="Edge">Our chance minus the chance implied by the best US sportsbook price. A positive edge means the price pays more than the risk deserves. Shown only when prices are loaded.</Term>
-            <Term name="Line">The book line when books offer one. Otherwise the player's usual line: his recent median, rounded to a half point.</Term>
+            <Term name="Line">The book line when books offer one. Otherwise the player's usual line: his recent median, rounded to a half point. If his recent games came in a different role (a backup now starting), this week's projection is used instead, marked "projected line".</Term>
             <Term name="Projection and range">For props, the middle outcome and the range he lands in 8 times out of 10.</Term>
             <Term name="Reasons">Why a pick ranks where it does: the opponent's defense against that position compared with the league, recent form, role and the team's scoring outlook.</Term>
           </dl>

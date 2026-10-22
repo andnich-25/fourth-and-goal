@@ -10,7 +10,7 @@ import { simulate, type Buckets, type SimLeg } from "@/lib/sim";
 import type { RankingRow } from "@/lib/types";
 import { dueOf, type Due, type DueBin } from "@/lib/signals";
 import { likelyToPlay, starterQbs } from "@/lib/playing";
-import { ladder, lineAtRate, rung } from "@/lib/hitrates";
+import { ladder, lineAtRate, playable, rung } from "@/lib/hitrates";
 
 export type Recent = { season: number; week: number; opponent: string; value: number };
 export type PropRow = { player_id: string; player_name: string; team: string; opponent: string; position: string; game_id: string; eligible: number;
@@ -472,10 +472,19 @@ const statOf = (m: string) => STAT[m] ?? m;
 const POS_NAME: Record<string, string> = { QB: "quarterbacks", RB: "running backs", WR: "receivers", TE: "tight ends" };
 const YARDS = new Set(["pass_yards", "rush_yards", "rec_yards", "rush_rec_yards", "pass_tds"]);
 
-/** The usual line for a player: his recent median rounded to a book-style half point (the line the backtest graded). */
-export function usualLine(r: PropRow, market: string): number | null {
+/** The line to show before books post one: his recent median rounded to a book-style half point (the line the
+ *  backtest graded), unless that sits far from this week's projection. Then his recent games came in a different role
+ *  (a backup now starting, a starter coming back from a short game) and no book would post it (e.g. 4.5 pass attempts
+ *  for a starting QB), so this week's projection, rounded the same way, is used instead and marked as projected. */
+export function estimatedLine(r: { median: number; evidence?: Record<string, number | null> }, market: string): { line: number; kind: "usual" | "projected" } {
   const m = r.evidence?.[`${statOf(market)}_med`];
-  return m == null ? null : Math.floor(m) + 0.5;
+  const projected = { line: Math.max(0.5, Math.floor(r.median) + 0.5), kind: "projected" as const };
+  if (m == null) return projected;
+  const line = Math.floor(m) + 0.5;
+  return Math.abs(r.median - line) > Math.max(1.5, 0.2 * Math.max(line, r.median)) ? projected : { line, kind: "usual" };
+}
+export function usualLine(r: PropRow, market: string): number | null {
+  return estimatedLine(r, market).line;
 }
 
 /** Plain reasons a player may fall short of a line, strongest first, from pregame data only. */
@@ -624,17 +633,21 @@ export function toSim(p: Pick): SimLeg {
 
 /* ------------------------------------------------------------------ hit rates, ladders, defenses, games, terms */
 const frac = (h: number, n: number) => `${h} of ${n}`;
+export const PLAYABLE_NOTE = "Only lines a book would realistically offer are used: about 30% either side of the main book line (or this week's projection until lines are loaded), where alternate lines usually stop. Exact alternate lines replace this estimate when they are pulled.";
 
 /** Props a player has cleared in (nearly) every recent game: the highest line he cleared at the threshold, per market. */
 export function answerHitRates(d: AskData, n: number, f: Filters, o: { threshold?: number; window?: number; side?: "over" | "under"; markets?: string[] } = {}): Answer {
   const threshold = o.threshold ?? 1, window = o.window ?? 8, sides = o.side ? [o.side] : (["over"] as const);
   const all: Pick[] = [];
+  let anyBook = false;
   for (const m of o.markets ?? Object.keys(d.props)) {
     for (const r of d.props[m]?.rows ?? []) {
       if (!r.eligible || !r.dist || !propPlays(d, r, m)) continue;
       if (!keep(d, f, { pos: r.position, team: r.team, opp: r.opponent, game_id: r.game_id })) continue;
       for (const side of sides) {
-        const x = lineAtRate(r, side, threshold, window);
+        const pl = playable(d.feed, m, r);
+        if (pl.source === "book") anyBook = true;
+        const x = lineAtRate(r, side, threshold, window, 5, pl);
         if (!x) continue;
         // Skip lines nobody bets (a 0.5 over for a player whose typical game is far above it).
         if (side === "over" && x.line < 1 && r.median > 3) continue;
@@ -657,6 +670,7 @@ export function answerHitRates(d: AskData, n: number, f: Filters, o: { threshold
     summary: `${picks.length} player props where he cleared the line in at least ${label} of his last ${window} games, at the highest line that holds. Highest model chance first: a perfect recent record does not mean a sure thing, so the model's chance for this week is shown beside each.`,
     picks: picks.slice(0, n), notes: [
       picks.length > n ? `Showing ${n} of ${picks.length}. Narrow it with a market, position or team, or ask for more.` : "",
+      anyBook ? "Lines are the ones the books post, alternate lines included." : PLAYABLE_NOTE,
       "Hit rates count games he played. Open a player on the Hit rates page to see every line.", ...priceNote(d)].filter(Boolean),
     followups: ["Props at a 90% hit rate", "Unders at a 100% hit rate last 5", "Best value bets"],
   };
@@ -668,14 +682,16 @@ export function answerLadder(d: AskData, ids: string[], market?: string, window 
   const m = market ?? Object.keys(d.props).find((k) => d.props[k].rows.some((r) => r.player_id === id && r.dist));
   const r = m ? d.props[m]?.rows.find((x) => x.player_id === id && x.dist) : undefined;
   if (!m || !r) return { title: "No lines for that player", summary: "No validated prop for that player and market this week.", notes: [], followups: ["Top 5 TD scorers"] };
-  const rungs = ladder(r, window);
+  const pl = playable(d.feed, m, r);
+  const rungs = ladder(r, window, pl);
   const book = feedLine(d.feed, m, id);
   return {
     title: `${r.player_name}: ${d.props[m].label} at every line`,
     summary: `Each line with this week's model chance and how often he cleared it in his last ${rungs[0]?.games ?? 0} games. Projection ${num1(r.median)} (80% range ${num1(r.q10)}–${num1(r.q90)}).${book != null ? ` Book line: ${book}.` : ""}`,
     table: { columns: ["Line", "Model over", "Model under", `Over, last ${rungs[0]?.games ?? 0}`, "Over, last 5"],
       rows: rungs.map((x) => [`${x.line}${x.line === book ? " (book)" : ""}`, pct(x.over ?? 0), pct(1 - (x.over ?? 0)), `${frac(x.hits, x.games)} (${pct(x.games ? x.hits / x.games : 0)})`, frac(x.hits5, x.games5)]) },
-    notes: [`Recent games, newest first: ${(r.recent ?? []).slice(0, window).map((g) => `${num1(g.value)} vs ${g.opponent}`).join(", ")}.`],
+    notes: [`Recent games, newest first: ${(r.recent ?? []).slice(0, window).map((g) => `${num1(g.value)} vs ${g.opponent}`).join(", ")}.`,
+      pl.source === "book" ? "These are the lines the books post, alternate lines included." : PLAYABLE_NOTE],
     followups: [`Why the ${r.player_name} ${lc(d.props[m].label)} pick?`, "Props at a 100% hit rate"],
   };
 }

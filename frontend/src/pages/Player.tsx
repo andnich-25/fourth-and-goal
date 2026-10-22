@@ -10,11 +10,13 @@ import type { Reason } from "@/lib/types";
 import { Badge, Card, CardBody, CardHeader, ErrorState, LoadingBlock, Notice, PosBadge, Segmented, Stat, TableWrap, Td, TeamBadge, Th } from "@/components/ui";
 import { ConfidenceBadge, Estimate, Flags, Outcome, ReasonList, SignalIcons } from "@/components/shared";
 import { useFeed } from "@/lib/feed";
+import { PlayerProps } from "@/components/PlayerProps";
 import { DUE_GAP, dueOf, tdEdge, tdLuck, useDueStudy } from "@/lib/signals";
 
 type Game = { week: number; opponent: string; carries: number; targets: number; receptions: number; rush_tds: number; rec_tds: number; anytime_tds: number;
   goal5_carries: number; goal10_carries: number; rz_carries: number; goal5_targets: number; goal10_targets: number; rz_targets: number; ez_target_proxy: number;
-  missed_rz_targets: number; missed_goal5_carries: number; xtd: number | null; offense_snaps: number; offense_pct: number | null; has_box: number; team: string };
+  missed_rz_targets: number; missed_goal5_carries: number; xtd: number | null; offense_snaps: number; offense_pct: number | null; has_box: number; team: string;
+  attempts: number | null; completions: number | null; pass_yards: number | null; pass_tds: number | null; interceptions: number | null; rush_yards: number | null; rec_yards: number | null };
 type Event = { week: number; game_id: string; play_id: string; offense: string; defense: string; event_type: string; yards_to_goal: number; air_yards: number | null;
   completed: number; td: number; ez_proxy: number; xtd: number | null; description: string; miss_label: string | null; ez_label: string | null };
 type PlayerResp = {
@@ -39,6 +41,7 @@ export default function PlayerPage() {
   const chart = (d?.games ?? []).map((g) => ({ week: `W${g.week}`, "Inside-5 carries": g.goal5_carries, "Inside-10 carries": g.goal10_carries, "RZ targets": g.rz_targets, TDs: g.anytime_tds, xTD: g.xtd != null ? +g.xtd.toFixed(2) : null }));
   const events = (d?.events ?? []).filter((e) => ledgerFilter === "all" || (ledgerFilter === "missed" ? !e.td : ledgerFilter === "td" ? e.td : e.yards_to_goal <= 5));
   const feed = useFeed(season, week);
+  const qb = d?.position === "QB";
   const tot = (k: keyof Game) => (d?.games ?? []).reduce((a, g) => a + (Number(g[k]) || 0), 0);
 
   return (
@@ -153,12 +156,14 @@ export default function PlayerPage() {
             </div>
           </div>
 
+          <PlayerProps playerId={d.player_id} season={season} week={week} feed={feed} />
+
           <Card>
             <CardHeader title="Game log" subtitle="Box score + play-by-play opportunity counts (zero-TD games included)" />
             <TableWrap>
-              <table className="w-full"><thead><tr><Th>Wk</Th><Th>Opp</Th><Th className="text-right">Snap%</Th><Th className="text-right">Car</Th><Th className="text-right">Tgt</Th><Th className="text-right">Rec</Th><Th className="text-right">≤5 car</Th><Th className="text-right">≤10 car</Th><Th className="text-right">RZ car</Th><Th className="text-right">≤5 tgt</Th><Th className="text-right">RZ tgt</Th><Th className="text-right">EZ proxy</Th><Th className="text-right" title="Inside-20 targets without a TD; not drops">Missed RZ tgt</Th><Th className="text-right">TDs</Th><Th className="text-right">xTD</Th></tr></thead>
+              <table className="w-full"><thead><tr><Th>Wk</Th><Th>Opp</Th><Th className="text-right">Snap%</Th>{qb && <><Th className="text-right">Cmp/Att</Th><Th className="text-right">Pass yds</Th><Th className="text-right">Pass TD</Th><Th className="text-right">INT</Th></>}<Th className="text-right">Car</Th><Th className="text-right">Rush yds</Th><Th className="text-right">Tgt</Th><Th className="text-right">Rec</Th><Th className="text-right">Rec yds</Th><Th className="text-right">≤5 car</Th><Th className="text-right">≤10 car</Th><Th className="text-right">RZ car</Th><Th className="text-right">≤5 tgt</Th><Th className="text-right">RZ tgt</Th><Th className="text-right">EZ proxy</Th><Th className="text-right" title="Inside-20 targets without a TD; not drops">Missed RZ tgt</Th><Th className="text-right">TDs</Th><Th className="text-right">xTD</Th></tr></thead>
                 <tbody>{d.games.map((g) => (
-                  <tr key={g.week}><Td>{g.week}</Td><Td>{g.opponent}</Td><Td className="text-right">{pct(g.offense_pct)}</Td><Td className="text-right">{g.carries}</Td><Td className="text-right">{g.targets}</Td><Td className="text-right">{g.receptions}</Td><Td className="text-right">{g.goal5_carries}</Td><Td className="text-right">{g.goal10_carries}</Td><Td className="text-right">{g.rz_carries}</Td><Td className="text-right">{g.goal5_targets}</Td><Td className="text-right">{g.rz_targets}</Td><Td className="text-right">{g.ez_target_proxy}</Td><Td className="text-right">{g.missed_rz_targets}</Td><Td className="text-right font-semibold">{g.anytime_tds}</Td><Td className="text-right">{num(g.xtd, 2)}</Td></tr>))}
+                  <tr key={g.week}><Td>{g.week}</Td><Td>{g.opponent}</Td><Td className="text-right">{pct(g.offense_pct)}</Td>{qb && <><Td className="text-right">{g.completions ?? 0}/{g.attempts ?? 0}</Td><Td className="text-right font-medium">{num(g.pass_yards, 0)}</Td><Td className="text-right">{g.pass_tds ?? 0}</Td><Td className="text-right">{g.interceptions ?? 0}</Td></>}<Td className="text-right">{g.carries}</Td><Td className="text-right font-medium">{num(g.rush_yards, 0)}</Td><Td className="text-right">{g.targets}</Td><Td className="text-right">{g.receptions}</Td><Td className="text-right font-medium">{num(g.rec_yards, 0)}</Td><Td className="text-right">{g.goal5_carries}</Td><Td className="text-right">{g.goal10_carries}</Td><Td className="text-right">{g.rz_carries}</Td><Td className="text-right">{g.goal5_targets}</Td><Td className="text-right">{g.rz_targets}</Td><Td className="text-right">{g.ez_target_proxy}</Td><Td className="text-right">{g.missed_rz_targets}</Td><Td className="text-right font-semibold">{g.anytime_tds}</Td><Td className="text-right">{num(g.xtd, 2)}</Td></tr>))}
                 </tbody>
               </table>
             </TableWrap>
