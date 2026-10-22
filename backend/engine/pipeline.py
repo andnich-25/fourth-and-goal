@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import aggregates, backtest, db, features, ingest, paths, predict, props, sources, status
+from . import aggregates, backtest, correlation, db, odds, features, ingest, paths, predict, props, sources, status
 from .util import utcnow
 
 
@@ -103,7 +103,7 @@ def run_props(c, season=2026, log=print) -> dict:
     return out
 
 
-def run_all(season=2026, download=False, force=False, steps=("sync", "build", "backtest", "predict", "props"), log=print) -> dict:
+def run_all(season=2026, download=False, force=False, steps=("sync", "build", "backtest", "predict", "props", "correlation", "odds"), log=print) -> dict:
     c = db.connect(paths.db_path())
     try:
         res = {}
@@ -118,6 +118,12 @@ def run_all(season=2026, download=False, force=False, steps=("sync", "build", "b
             res["predict"] = run_predict(c, season, log=log)
         if "props" in steps:
             res["props"] = run_props(c, season, log)
+        if "correlation" in steps:
+            rep = correlation.run(c, log)
+            res["correlation"] = {"run_id": rep["run_id"], "used": rep["use_correlation"]}
+        if "odds" in steps:
+            snap = odds.maybe_fetch(c, season, log)
+            res["odds"] = {"fetched_at": snap["fetched_at"], "rows": len(snap["rows"])} if snap else None
         st = status.write_build_status(c, season)
         log(f"build_status.json written: ready={st['ready']} promoted={st['model']['promoted']}")
         return res

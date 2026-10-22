@@ -54,15 +54,30 @@ def week_props(season: int | None = None, week: int | None = None, market: str =
         return {"season": season, "week": week, "market": meta, "rows": [], "run_id": None,
                 "empty_reason": f"Prop projections are published for the upcoming week only (not {season} Week {week})."}
     rows = []
+    recent = _recent(c, season, week, props.MARKETS[market]["stat"])
     for r in c.execute("SELECT * FROM prop_projections WHERE run_id=? AND market=? ORDER BY eligible DESC, median DESC",
                        (run["run_id"], market)):
         d = dict(r)
+        d["recent"] = recent.get((d["player_id"], d["team"]), [])
         d["flags"] = loads(d["flags"], [])
         d["evidence"] = loads(d["evidence"], {})
         d["dist"] = loads(d["dist"], {}) if d["calibrated"] else None  # over/under chances only for validated markets
         rows.append(d)
     return {"season": season, "week": week, "market": meta, "run_id": run["run_id"], "as_of": run["created_at"], "rows": rows,
             "note": NO_LINES_NOTE}
+
+
+def _recent(c, season: int, week: int, stat: str, n: int = 8) -> dict:
+    """Each player's last n games before the target week, most recent first (context for the reader, not a model input)."""
+    h = props.load_history(c)
+    h = h[(h.season < season) | ((h.season == season) & (h.week < week))]
+    out = {}
+    for pid, g in h.groupby("player_id", sort=False):
+        g = g.iloc[::-1].head(n)
+        vals = [{"season": int(s), "week": int(w), "opponent": o, "value": float(v)} for s, w, o, v in zip(g.season, g.week, g.opponent, g[stat])]
+        for team in set(g.team):
+            out[(pid, team)] = vals
+    return out
 
 
 @router.get("/props/backtest")

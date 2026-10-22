@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Search } from "lucide-react";
 import { api } from "@/lib/api";
 import { americanToProb, cn, num, pct } from "@/lib/format";
+import { feedLine, useFeed } from "@/lib/feed";
 import { MARKET_GROUPS, pOver, type PropDist } from "@/lib/props";
 import { useLinkSuffix, useSeasonWeek } from "@/lib/state";
 import { PageTitle } from "@/components/Layout";
@@ -68,6 +69,17 @@ export default function PropsPage() {
   const stat = ({ pass_attempts: "attempts", rush_rec_yards: "rush_rec_yards" } as Record<string, string>)[market] ?? market;
   const rows = (d?.rows ?? []).filter((r) => !search || r.player_name.toLowerCase().includes(search.toLowerCase()));
   const key = (r: PropRow) => `${season}-${week}-${market}-${r.player_id}`;
+  const feed = useFeed(season, week);
+  // Typed values win; otherwise the line most books offer and the best over price at that line.
+  const lineFor = (r: PropRow) => {
+    const typed = lines[key(r)] ?? {};
+    const fl = feedLine(feed, market, r.player_id);
+    const line = typed.line ?? (fl != null ? String(fl) : undefined);
+    const prices = feed.get(market, r.player_id, "over").filter((o) => line != null && o.line === Number(line)).map((o) => o.price);
+    const best = prices.length ? Math.max(...prices.map((x) => (x > 0 ? x : -10000 / x))) : null;
+    const bestStr = best == null ? undefined : best >= 100 ? `+${Math.round(best)}` : String(Math.round(-10000 / best));
+    return { line, odds: typed.odds ?? bestStr };
+  };
 
   return (
     <div className="space-y-5">
@@ -114,7 +126,7 @@ export default function PropsPage() {
               <tbody>
                 {rows.map((r) => {
                   const k = key(r);
-                  const ln = lines[k] ?? {};
+                  const ln = lineFor(r);
                   const lineNum = ln.line ? Number(ln.line) : NaN;
                   const over = r.dist && Number.isFinite(lineNum) ? pOver(r.dist, lineNum) : null;
                   const implied = ln.odds ? americanToProb(ln.odds) : null;

@@ -48,7 +48,7 @@ Environment variables: `FG_DATA_DIR` (default `./data`), `FG_DB`, `FG_RAW_DIR`, 
 ## Checks
 
 ```bash
-cd backend && python -m pytest -q          # 12 tests: parser invariants + synthetic end-to-end
+cd backend && python -m pytest -q          # 17 tests: parser invariants, synthetic end-to-end, correlation maths, odds-feed parsing
 cd backend && python -m engine.cli smoke-test
 cd frontend && npm run typecheck && npm test && npm run build
 ```
@@ -61,6 +61,7 @@ cd frontend && npm run typecheck && npm test && npm run build
 | `/rankings` | All eligible players. Server-side sort, filter, paging; column toggles; pin up to 3; CSV export; expandable "why ranked here"; card layout on mobile |
 | `/props` | Player props (passing, rushing, receiving): projection, 10–90% range, and for validated markets the chance of going over a line you type |
 | `/trends` | Who is scoring this season: which pregame metrics separated scorers, where TDs start, leaders, generous defenses |
+| `/builder` | Parlay builder: anytime-TD and validated prop legs, each book's price with the best one highlighted (filled from the odds feed when configured), 40,000-run simulation with same-game correlation, legs-hit distribution, expected return at the best price, CSV export; plus a game simulator showing the most likely scoring pairs |
 | `/parlay` | Top 3 builder: evidence rules, exclude and replace, pinned legs, manual American/decimal odds with implied probability, independence product clearly marked simplistic, immutable locks with later grading, CSV export |
 | `/defenses`, `/defenses/:team` | All 32 defenses by position (season / last 6 / last 3), xTD allowed, red-zone drive TD rate, pace faced, two-team compare, every TD allowed |
 | `/players/:id` | Identity and game, weekly inside-5/10 carries and red-zone targets chart with xTD, field-position split, game log, scoring-chance ledger (misses labelled as missed opportunities, end-zone target proxy labelled as a proxy), opponent history |
@@ -100,6 +101,18 @@ Top-3 by the promoted model: 47 of 72 picks scored (65%, Wilson 95% CI 54–75%)
 ## Tuning study
 
 `python -m engine.tuning` tests feature settings and extra metrics on 2025 and checks the winner once on the current season's completed weeks; results appear on the Backtest page. The October 2026 run kept the existing settings because the best 2025 setting was worse on 2026.
+
+## Parlays and simulations
+
+`engine/correlation.py` turns every walk-forward prediction (anytime TD from the promoted model, and overs at the reference line for each promoted prop market) into a yes/no event, pairs up events from the same game, and estimates by maximum likelihood how strongly each kind of pair moves together (Gaussian copula; buckets by same player / teammates / opponents, market and position, each shrunk toward its parent). The correlation for test week W is learned only from earlier weeks. It is used only if it beats simply multiplying the chances on unseen weeks.
+
+October 2026 run: 15,899 events, 341,608 same-game pairs, 21 test weeks. Correlated chances beat multiplication on pairs (log-loss gain 0.00033, week-bootstrap 95% CI 0.00004 to 0.00064), were better on 3-leg combos (+0.00068) and on 2026 alone (+0.00075), so the builder uses them. Largest links: a QB's passing-TD over with his WRs scoring (rho about 0.43), a player's receptions over with his own TD (0.35); teammates both scoring is slightly negative (about -0.05). Opponents are close to independent.
+
+The browser repeats the same model (`frontend/src/lib/sim.ts`): 40,000 correlated draws per slip, legs in different games independent.
+
+## Sportsbook prices (optional)
+
+`engine/odds.py` reads current prices from The Odds API (a licensed feed; scraping sportsbook sites is against their terms) for anytime TD, receptions, passing yards, passing TDs, interceptions and rush attempts across US books. Add a free key at the-odds-api.com as the repository secret `ODDS_API_KEY`. Each fetch costs about 6 credits per game (about 90-100 a week); the free plan has 500 a month, so the hosted site fetches on the Saturday run and on manual runs only, and keeps the snapshot between runs. Without a key, prices are typed in. Locally: `ODDS_API_KEY=... python -m engine.odds`.
 
 ## Data honesty rules enforced in code
 

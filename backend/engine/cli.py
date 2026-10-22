@@ -16,7 +16,7 @@ from . import db, paths, pipeline, status
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="engine.cli")
-    ap.add_argument("command", choices=["all", "sync", "build", "backtest", "predict", "props", "status", "smoke-test"])
+    ap.add_argument("command", choices=["all", "sync", "build", "backtest", "predict", "props", "correlation", "status", "smoke-test"])
     ap.add_argument("--season", type=int, default=2026)
     ap.add_argument("--week", type=int, help="predict a single week (default: all weeks of the season)")
     ap.add_argument("--download", action="store_true", help="download missing nflverse CSVs into data/raw")
@@ -50,6 +50,10 @@ def main(argv=None) -> int:
             weeks = [(a.season, a.week)] if a.week else None
             for r in pipeline.run_predict(c, a.season, weeks, log):
                 print(r)
+        elif a.command == "correlation":
+            from . import correlation  # noqa: PLC0415
+            r = correlation.run(c, log)
+            print(json.dumps({"run_id": r["run_id"], "used": r["use_correlation"], "gate": r["validation"]["gate"]}, indent=2))
         elif a.command == "props":
             print(json.dumps(pipeline.run_props(c, a.season, log), indent=2, default=str))
         st = status.write_build_status(c, a.season)

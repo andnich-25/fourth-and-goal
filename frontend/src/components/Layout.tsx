@@ -2,7 +2,7 @@ import * as React from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity, BarChart3, Database, Flame, LayoutDashboard, ListOrdered, Moon, Settings, Shield, SlidersHorizontal, Sun, Target, Menu, X,
+  Activity, BarChart3, Database, Dices, Flame, LayoutDashboard, ListOrdered, Moon, Settings, Shield, SlidersHorizontal, Sun, Target, Menu, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/format";
@@ -13,6 +13,7 @@ const NAV = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/rankings", label: "Rankings", icon: ListOrdered },
   { to: "/parlay", label: "Top 3", icon: Target },
+  { to: "/builder", label: "Parlay builder", icon: Dices },
   { to: "/props", label: "Props", icon: SlidersHorizontal },
   { to: "/trends", label: "Who scores", icon: Flame },
   { to: "/defenses", label: "Defenses", icon: Shield },

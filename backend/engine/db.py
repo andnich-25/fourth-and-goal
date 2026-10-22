@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS prop_projections(
   PRIMARY KEY(run_id, market, player_id, team)
 );
 CREATE INDEX IF NOT EXISTS idx_propproj ON prop_projections(season, week, market);
+CREATE TABLE IF NOT EXISTS sim_runs(run_id TEXT PRIMARY KEY, kind TEXT, created_at TEXT, report TEXT);
 
 -- Audit / user data ----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS top3_locks(

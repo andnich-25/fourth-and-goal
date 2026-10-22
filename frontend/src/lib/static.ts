@@ -195,14 +195,14 @@ async function locks(params: Params) {
 
 /* ---------- CSV exports built in the browser ---------- */
 
-function csv(rows: unknown[][]): string {
+export function csv(rows: unknown[][]): string {
   return rows.map((r) => r.map((v) => {
     const s = v === null || v === undefined ? "" : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   }).join(",")).join("\n") + "\n";
 }
 
-function save(name: string, text: string) {
+export function saveCsv(name: string, text: string) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
   a.download = name;
@@ -222,7 +222,7 @@ export async function staticDownload(path: string, params: Params = {}) {
       r.opponent, r.eligible ? 1 : 0, r.exclusion, r.score, d.calibrated ? r.p_model : "", r.confidence, r.flags.join("; "), f(r, "rz_carries_pg"),
       f(r, "goal5_carries_pg"), f(r, "rz_targets_pg"), f(r, "ez_proxy_pg"), f(r, "xtd_pg"), f(r, "xtd_share"), f(r, "team_implied_total"),
       f(r, "opp_def_pos_td_pg"), d.model_version, d.calibrated ? "True" : "False", d.data_cutoff, d.run_id, d.as_of]);
-    save(`fourth-and-goal-rankings-${p.season}-w${p.week}.csv`, csv([head, ...body]));
+    saveCsv(`fourth-and-goal-rankings-${p.season}-w${p.week}.csv`, csv([head, ...body]));
   } else if (path === "/export/locks.csv") {
     const all = await Promise.all(readLocks().sort((a, b) => a.created_at.localeCompare(b.created_at)).map(audit));
     const head = ["lock_id", "locked_at_utc", "season", "week", "model_version", "calibrated", "data_cutoff", "player", "team", "position",
@@ -232,7 +232,7 @@ export async function staticDownload(path: string, params: Params = {}) {
       return [a.lock_id, a.created_at, a.season, a.week, a.model_version, a.calibrated ? "True" : "False", a.data_cutoff, x.player_name, x.team,
         x.position, x.opponent, x.kickoff_utc, x.rank, x.score, a.calibrated ? x.p_model : "", x.odds_input, x.implied_market_prob, x.result, "", a.note];
     }));
-    save("fourth-and-goal-locked-selections.csv", csv([head, ...body]));
+    saveCsv("fourth-and-goal-locked-selections.csv", csv([head, ...body]));
   }
 }
 

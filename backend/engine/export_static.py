@@ -51,13 +51,14 @@ def main(argv=None):
         n += 1
         return r.json()
 
-    for p in ("/health", "/data/status", "/backtest/tuning", "/backtest/summary", "/backtest/weeks", "/backtest/calibration", "/feature-glossary"):
+    for p in ("/health", "/data/status", "/parlay/model", "/backtest/tuning", "/backtest/summary", "/backtest/weeks", "/backtest/calibration", "/feature-glossary"):
         save(p)
     wk = save("/weeks")
     pm = save("/props/markets")
     for m in (pm or {}).get("markets", []):
         save("/props/backtest", {"market": m["market"]})
         save("/props", {"season": wk["current_season"], "week": wk["current_week"], "market": m["market"]})
+    save("/odds", {"season": wk["current_season"], "week": wk["current_week"]})
     save("/scoring-trends", {"season": wk["current_season"]})
     bt = client.get("/api/backtest/summary").json()
     for m in list(bt.get("overall", {})) + ["baseline-opportunity"]:

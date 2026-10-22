@@ -1,7 +1,7 @@
 # Rebuilds the free hosted website from fresh nflverse data and publishes it to GitHub Pages.
 # Runs Tuesday morning (after Monday night), Thursday morning (injury reports, before TNF),
 # Saturday morning and Sunday morning (final injury designations), on every push to main,
-# and on demand from the Actions tab.
+# and on demand from the Actions tab. Sportsbook prices are fetched on Saturday and manual runs.
 name: Refresh data and publish site
 
 on:
@@ -51,11 +51,24 @@ jobs:
           key: nflverse-raw-${{ github.run_id }}
           restore-keys: nflverse-raw-
 
+      # Sportsbook price snapshots (The Odds API) are kept between runs so the weekly fetch is reused.
+      - name: Restore sportsbook price snapshots
+        uses: actions/cache@v4
+        with:
+          path: data/odds
+          key: odds-${{ github.run_id }}
+          restore-keys: odds-
+
       - name: Install backend
         run: pip install -r backend/requirements.txt
 
       - name: Download, import, validate and predict
         working-directory: backend
+        env:
+          # Optional repository secret. Without it the site still builds and prices are typed in by hand.
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          # Fetch prices on the Saturday run and on manual runs only (free plan: 500 credits a month).
+          FG_ODDS_FETCH: ${{ github.event.schedule == '0 15 * * 6' || github.event_name == 'workflow_dispatch' }}
         run: python -m engine.cli all --download
 
       - name: Check engine invariants

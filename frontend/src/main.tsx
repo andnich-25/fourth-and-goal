@@ -16,6 +16,7 @@ import DataSync from "./pages/DataSync";
 import SettingsPage from "./pages/Settings";
 import Props from "./pages/Props";
 import Trends from "./pages/Trends";
+import Builder from "./pages/Builder";
 import { EmptyState } from "./components/ui";
 import { STATIC } from "./lib/api";
 
@@ -36,6 +37,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Route index element={<Overview />} />
               <Route path="rankings" element={<Rankings />} />
               <Route path="parlay" element={<Parlay />} />
+              <Route path="builder" element={<Builder />} />
               <Route path="props" element={<Props />} />
               <Route path="trends" element={<Trends />} />
               <Route path="defenses" element={<Defenses />} />

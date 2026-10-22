@@ -11,3 +11,4 @@ __pycache__/
 .venv/
 site-data/
 site-dist/
+data/odds/
