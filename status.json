@@ -1,0 +1,234 @@
+{
+  "date": "2026-10-22",
+  "ran_at": "2026-10-22T21:47:25+00:00",
+  "files": [
+    {
+      "file": "cfb_schedules_2010.csv",
+      "status": "downloaded",
+      "bytes": 174248
+    },
+    {
+      "file": "cfb_schedules_2011.csv",
+      "status": "downloaded",
+      "bytes": 175490
+    },
+    {
+      "file": "cfb_schedules_2012.csv",
+      "status": "downloaded",
+      "bytes": 184862
+    },
+    {
+      "file": "cfb_schedules_2013.csv",
+      "status": "downloaded",
+      "bytes": 187859
+    },
+    {
+      "file": "cfb_schedules_2014.csv",
+      "status": "downloaded",
+      "bytes": 362190
+    },
+    {
+      "file": "cfb_schedules_2015.csv",
+      "status": "downloaded",
+      "bytes": 353251
+    },
+    {
+      "file": "cfb_schedules_2016.csv",
+      "status": "downloaded",
+      "bytes": 379791
+    },
+    {
+      "file": "cfb_schedules_2017.csv",
+      "status": "downloaded",
+      "bytes": 383955
+    },
+    {
+      "file": "cfb_schedules_2018.csv",
+      "status": "downloaded",
+      "bytes": 388878
+    },
+    {
+      "file": "cfb_schedules_2019.csv",
+      "status": "downloaded",
+      "bytes": 404815
+    },
+    {
+      "file": "cfb_schedules_2020.csv",
+      "status": "downloaded",
+      "bytes": 166315
+    },
+    {
+      "file": "cfb_schedules_2021.csv",
+      "status": "downloaded",
+      "bytes": 561913
+    },
+    {
+      "file": "cfb_schedules_2022.csv",
+      "status": "downloaded",
+      "bytes": 863335
+    },
+    {
+      "file": "cfb_schedules_2023.csv",
+      "status": "downloaded",
+      "bytes": 884855
+    },
+    {
+      "file": "cfb_schedules_2024.csv",
+      "status": "downloaded",
+      "bytes": 905442
+    },
+    {
+      "file": "cfb_schedules_2025.csv",
+      "status": "downloaded",
+      "bytes": 840928
+    },
+    {
+      "file": "cfb_schedules_2026.csv",
+      "status": "downloaded",
+      "bytes": 215359
+    },
+    {
+      "file": "team_box_2012.csv",
+      "status": "downloaded",
+      "bytes": 180315
+    },
+    {
+      "file": "team_box_2013.csv",
+      "status": "downloaded",
+      "bytes": 182803
+    },
+    {
+      "file": "team_box_2014.csv",
+      "status": "downloaded",
+      "bytes": 185751
+    },
+    {
+      "file": "team_box_2015.csv",
+      "status": "downloaded",
+      "bytes": 186579
+    },
+    {
+      "file": "team_box_2016.csv",
+      "status": "downloaded",
+      "bytes": 187075
+    },
+    {
+      "file": "team_box_2017.csv",
+      "status": "downloaded",
+      "bytes": 188360
+    },
+    {
+      "file": "team_box_2018.csv",
+      "status": "downloaded",
+      "bytes": 190320
+    },
+    {
+      "file": "team_box_2019.csv",
+      "status": "downloaded",
+      "bytes": 189624
+    },
+    {
+      "file": "team_box_2020.csv",
+      "status": "downloaded",
+      "bytes": 137091
+    },
+    {
+      "file": "team_box_2021.csv",
+      "status": "downloaded",
+      "bytes": 190046
+    },
+    {
+      "file": "team_box_2022.csv",
+      "status": "downloaded",
+      "bytes": 191773
+    },
+    {
+      "file": "team_box_2023.csv",
+      "status": "downloaded",
+      "bytes": 193808
+    },
+    {
+      "file": "team_box_2024.csv",
+      "status": "downloaded",
+      "bytes": 205716
+    },
+    {
+      "file": "team_box_2025.csv",
+      "status": "downloaded",
+      "bytes": 203897
+    },
+    {
+      "file": "team_box_2026.csv",
+      "status": "downloaded",
+      "bytes": 108796
+    },
+    {
+      "file": "player_box_2021.csv",
+      "status": "downloaded",
+      "bytes": 4883055
+    },
+    {
+      "file": "player_box_2022.csv",
+      "status": "downloaded",
+      "bytes": 4502016
+    },
+    {
+      "file": "player_box_2023.csv",
+      "status": "downloaded",
+      "bytes": 6339777
+    },
+    {
+      "file": "player_box_2024.csv",
+      "status": "downloaded",
+      "bytes": 8739614
+    },
+    {
+      "file": "player_box_2025.csv",
+      "status": "downloaded",
+      "bytes": 8910074
+    },
+    {
+      "file": "player_box_2026.csv",
+      "status": "downloaded",
+      "bytes": 4914141
+    },
+    {
+      "file": "cfb_line_odds.csv.gz",
+      "status": "downloaded",
+      "bytes": 7047701
+    },
+    {
+      "file": "play_by_play_2026.parquet",
+      "status": "downloaded",
+      "bytes": 70727436
+    }
+  ],
+  "espn": {
+    "scoreboard": {
+      "error": "HTTP Error 400: Bad Request"
+    },
+    "rankings": {
+      "saved": "2026-10-22.json",
+      "items": 5
+    }
+  },
+  "odds": {
+    "saved": "2026-10-22.json",
+    "game_lines": 2540,
+    "team_totals": 0,
+    "props": 0,
+    "budget": {
+      "plan": "free",
+      "allowance": 500.0,
+      "reserve": 200.0,
+      "game_lines": true,
+      "team_totals": 0,
+      "props": 0,
+      "cost": 3,
+      "reason": "ok"
+    },
+    "credits_remaining": 413.0,
+    "errors": []
+  },
+  "license": "College football scores, schedules, closing lines and player stats: cfbfastR / CollegeFootballData.com, https://github.com/sportsdataverse/cfbfastR-data. Scoreboard: ESPN public site feed. Prices: The Odds API."
+}
