@@ -118,8 +118,9 @@ describe("ask parser", () => {
     const a = answer(dd, "Why is it suggesting Hunter Henry's under?");
     expect(a.picks?.[0].side).toBe("under");
     expect(a.picks?.[0].reasons?.some((r) => r.includes("CHI allows 15% fewer"))).toBe(true);
-    expect(a.notes.some((n) => n.startsWith("Projection 3.6"))).toBe(true);
-    expect(a.notes.some((n) => n.includes("Last 8 games"))).toBe(true);
+    const facts = a.sections!.flatMap((x) => x.lines);
+    expect(facts.some((n) => n.startsWith("Projection 3.6"))).toBe(true);
+    expect(facts.some((n) => n.includes("Last 8 games"))).toBe(true);
   });
 
   it("builds parlays from every market unless TDs are asked for", () => {
@@ -198,5 +199,35 @@ describe("ask parser", () => {
     expect(parse(d, "Kyren or Gibbs").players.length).toBeGreaterThan(0);
     expect(parse(d, "best bets this week").intent).toBe("any");
     expect(parse(d, "what does Strong mean").intent).toBe("glossary");
+  });
+
+  it.each([["Why is Detroit favored?", "matchup"], ["who wins bears patriots", "matchup"], ["break down the lions game", "matchup"],
+    ["why are these your picks", "whypicks"], ["explain your best bet", "whypicks"], ["patriots bears", "game"]])("%s -> %s", (q, intent) => expect(parse(d, q).intent).toBe(intent));
+
+  it("writes up why a team is favored from the line, both defenses and the players", () => {
+    const withLines: AskData = { ...d, td: [...d.td, row("9", "Mike Evans", "TB", "DET", "WR", 0.36, "2026_07_TB_DET", "2026-10-26")].map((r) => ({ ...r, features: { team_implied_total: r.team === "DET" ? 28.5 : r.team === "TB" ? 21 : 22 } })),
+      defenses: { league: { RB: { tds_pg: 0.8, xtd_pg: 0.8 }, WR: { tds_pg: 0.9, xtd_pg: 0.9 }, TE: { tds_pg: 0.3, xtd_pg: 0.3 }, QB: { tds_pg: 0.2, xtd_pg: 0.2 }, rz_td_rate: 0.55 },
+        scheme_league: { blitz_rate: 0.25, man_rate: 0.3 },
+        teams: [
+          { defense: "TB", games: 6, available: true, points_allowed_pg: 27.2, offensive_tds_allowed_pg: 3.1, xtd_allowed_pg: 2.9, rz_td_rate_allowed: 0.66, plays_faced_pg: 64,
+            positions: { RB: { tds: 7, tds_pg: 1.2, xtd_pg: 1.1 }, WR: { tds: 5, tds_pg: 0.8, xtd_pg: 0.9 } }, scheme: { rates: { blitz_rate: 0.35, man_rate: 0.2 }, top_shell: ["Cover 3", 0.38] } },
+          { defense: "DET", games: 6, available: true, points_allowed_pg: 18.0, offensive_tds_allowed_pg: 2.0, xtd_allowed_pg: 2.1, rz_td_rate_allowed: 0.5, plays_faced_pg: 62,
+            positions: { RB: { tds: 3, tds_pg: 0.5, xtd_pg: 0.6 } } }] } };
+    const a = answer(withLines, "Why is Detroit favored?");
+    const titles = a.sections!.map((x) => x.title);
+    expect(titles.slice(0, 2)).toEqual(["The line", "Why DET is favored"]);
+    const text = a.sections!.flatMap((x) => x.lines).join("\n");
+    expect(text).toMatch(/DET is favored by about 7\.5/);
+    expect(text).toMatch(/does not model NFL spreads/);
+    expect(text).toMatch(/TB defense \(6 games before this week\): 27\.2 points/);
+    expect(text).toMatch(/RBs \+50%/);
+    expect(text).toMatch(/blitz rate 35% \(league 25%\)/);
+    expect(text).toMatch(/Jahmyr Gibbs 63%/);
+  });
+
+  it("explains the top picks one by one", () => {
+    const a = answer(d, "why are these your picks");
+    expect(a.sections?.length).toBeGreaterThan(0);
+    expect(a.sections![0].title).toMatch(/Jahmyr Gibbs/);
   });
 });

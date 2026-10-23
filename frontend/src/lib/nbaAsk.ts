@@ -3,14 +3,15 @@
    is simulated with the published same-game links, and every claim about accuracy quotes the published backtest.
    Any question gets an answer: when nothing specific is recognised it says what it read and shows tonight's
    strongest leans. */
-import { MIN_LINE, NBA_MARKETS, bestOffer, edgeOf, leanOf, marketLabel, overAt, type MarketReport, type NbaConfidence, type NbaDue,
+import { MIN_LINE, NBA_MARKETS, bestOffer, bookName, edgeOf, leanOf, marketLabel, overAt, type MarketReport, type NbaGame, type NbaConfidence, type NbaDue,
   type NbaRecord, type NbaRow, type NbaStatus, type Slate } from "./nba";
 import type { Buckets, SimLeg } from "./sim";
 import { simulate } from "./sim";
+import { tidy, type Section } from "./writeup";
 
 export type AskItem = { row: NbaRow; side: "over" | "under"; line: number; p: number; note?: string };
 export type AskAnswer = {
-  title: string; text?: string; items: AskItem[]; bullets?: string[];
+  title: string; text?: string; items: AskItem[]; bullets?: string[]; sections?: Section[];
   parlay?: { joint: number; independent: number; draws: number };
   suggestions?: string[];
 };
@@ -155,6 +156,9 @@ const tierWord = (c: NbaConfidence | undefined, p: number) => {
   return t ? `${t.tier}: such leans hit ${pctS(t.rate)} of ${t.n.toLocaleString()} unseen games` : null;
 };
 
+/** Questions asking for reasons, a breakdown or how sure the model is. */
+const WHY = /\b(why|reason\w*|explain\w*|because|how come|what makes|break ?down|analy[sz]\w*|case (for|against)|confident|confidence|how sure|trust|rated|rating|score of|thoughts|your take|write ?up|deep dive|justify|based on what|what do you (see|like))\b/;
+
 // ---------------------------------------------------------------------------- the router
 export function answer(question: string, slate: Slate, buckets: Buckets = {}, useCorrelation = false, ctx: AskContext = {}): AskAnswer {
   const q = plain(question).replace(/[?!,]/g, " ").replace(/\s+/g, " ").trim();
@@ -228,9 +232,9 @@ export function answer(question: string, slate: Slate, buckets: Buckets = {}, us
   }
 
   // ---- a game preview: two teams, or "game"/"matchup"/"preview" with a team
-  if (teams.length >= 2 || (teams.length === 1 && /\b(game|matchup|preview|breakdown|tonight|spread|total|win|winner|beat|score)\b/.test(q) && !market)) {
+  if (teams.length >= 2 || (teams.length === 1 && (/\b(game|matchup|preview|break ?down|tonight|spread|total|win|wins|winner|beat|score|favou?red|favou?rite|fav|underdog|dog|upset|predict\w*|analy[sz]\w*|why|explain|thoughts|take|write ?up|deep dive)\b/.test(q)) && !market)) {
     const g = slate.games.find((x) => teams.every((t) => t === x.home || t === x.away));
-    if (g) return gamePreview(slate, g.game_id, buckets, useCorrelation);
+    if (g) return gamePreview(slate, g.game_id, buckets, useCorrelation, ctx);
     if (teams.length) return { title: `${teams.join(" / ")} not on tonight's slate`, items: [], bullets: slate.games.map((x) => `${x.away} @ ${x.home}, ${tip(x.time)}`),
       text: "Tonight's games are listed below." };
   }
@@ -298,6 +302,18 @@ export function answer(question: string, slate: Slate, buckets: Buckets = {}, us
     const ms = all.filter((r) => r.market === (market ?? "points") && !r.out && (!teams.length || teams.includes(r.team))).sort((a, b) => b.evidence.minutes - a.evidence.minutes);
     return { title: "Expected minutes (recent average)", items: ms.slice(0, countOf(q, 15)).map((r) => { const l = leanOf(r); return item(r, l?.side ?? "over", r.line, l?.p ?? 0.5,
       `~${fmt(r.evidence.minutes, 0)} min recent, ${fmt(r.evidence.minutes_long, 0)} longer run, starts ${pctS(r.evidence.start_rate)}`); }) };
+  }
+
+  // ---- "why are these the picks", "explain your best bet"
+  if (WHY.test(q) && /\b(picks?|bets?|plays?|locks?|leans?|best|top|safest|strongest|these|them|your)\b/.test(q)) {
+    const pool = leans(scoped.filter((r) => r.evidence.minutes_long >= 20));
+    const top = pool.slice(0, countOf(q, /\b(pick|bet|play|lock|lean)\b(?!s)/.test(q) ? 1 : 3));
+    if (top.length) return { title: top.length === 1 ? `Why ${top[0].r.player_name} ${top[0].l.side} ${top[0].r.line} ${marketLabel(top[0].r.market).toLowerCase()} is the top lean` : `Why these are tonight's ${top.length} strongest leans`,
+      items: top.map((x) => item(x.r, x.l.side, x.r.line, x.l.p, `projects ${fmt(x.r.mean)}`)),
+      text: "Each lean's case, what works against it and how leans like it have done.",
+      sections: top.flatMap((x) => (top.length === 1 ? explainRow(x.r, x.l.side, ctx)
+        : [{ title: `${x.r.player_name} ${x.l.side} ${x.r.line} ${marketLabel(x.r.market).toLowerCase()}: ${score(x.l.p)}/10`, lines: [...reasons(x.r, x.l.side), ...(tierWord(ctx.conf, x.l.p) ? [`${tierWord(ctx.conf, x.l.p)}.`] : [])] }])),
+      suggestions: top.slice(0, 3).map((x) => `Why ${x.r.player_name} ${x.l.side}?`) };
   }
 
   // ---- safest / locks / confidence
@@ -401,12 +417,14 @@ function playerAnswer(q: string, p: Player, markets: string[], num: ReturnType<t
   }
 
   // why
-  if (/\b(why|reason\w*|explain|because|how come)\b/.test(q)) {
+  if (WHY.test(q)) {
     // "why is he under": explain the strongest prop leaning that way
     const cands = (mine.length ? mine : shown).filter((x) => x.dist).map((x) => ({ x, l: leanOf(x) })).filter((c) => c.l && (!wantUnder || c.l.side === "under") && (!wantOver || c.l.side === "over"))
       .sort((a, b) => b.l!.p - a.l!.p);
     const r = cands[0]?.x;
-    if (r) { const l = leanOf(r)!; return { title: `Why ${name} leans ${l.side} ${r.line} ${marketLabel(r.market).toLowerCase()}`, items: [item(r, l.side, r.line, l.p)], bullets: reasons(r, l.side) }; }
+    if (r) { const l = leanOf(r)!; return { title: `Why ${name} leans ${l.side} ${r.line} ${marketLabel(r.market).toLowerCase()}`, items: [item(r, l.side, r.line, l.p)],
+      text: `${score(l.p)} out of 10: the model's chance of the ${l.side}, times 10.`, sections: explainRow(r, l.side, ctx),
+      suggestions: [`${name} last 10 games`, `${r.team} ${r.home ? "vs" : "@"} ${r.opp} preview`, `${name} all props`] }; }
   }
 
   // default: every prop, strongest first, with the reasons for the best one
@@ -437,7 +455,7 @@ function reasons(r: NbaRow, side: "over" | "under"): string[] {
 }
 
 // ---------------------------------------------------------------------------- games, injuries, parlays, doubles
-function gamePreview(slate: Slate, gid: number, buckets: Buckets, useCor: boolean): AskAnswer {
+function gamePreview(slate: Slate, gid: number, buckets: Buckets, useCor: boolean, ctx: AskContext = {}): AskAnswer {
   const g = gameOf(slate, gid)!;
   const rs = slate.rows.filter((r) => r.game_id === gid);
   const pts = (t: string) => rs.filter((r) => r.team === t && r.market === "points" && !r.out).reduce((a, r) => a + r.mean, 0);
@@ -448,12 +466,104 @@ function gamePreview(slate: Slate, gid: number, buckets: Buckets, useCor: boolea
   return { title: `${g.away} @ ${g.home}, ${tip(g.time)}`, items: its,
     text: g.total != null ? `Book total ${g.total}${g.home_spread != null ? `, ${g.home} ${g.home_spread > 0 ? "+" : ""}${g.home_spread}` : ""}.` : undefined,
     bullets: [
-      `Main rotation projects ${fmt(pts(g.away), 0)} points for ${g.away} and ${fmt(pts(g.home), 0)} for ${g.home} (bench players not counted).`,
-      ...(outs.length ? [`Injury report: ${outs.join("; ")}.`] : ["No one in either rotation is on the injury report."]),
       ...(sim ? [`Strongest same-game ${sgp.length}-leg: ${sgp.map((x) => `${x.row.player_name} ${x.side} ${x.line} ${marketLabel(x.row.market).toLowerCase()}`).join(" + ")}, all hit ${pctS(sim.joint)} in ${sim.draws.toLocaleString()} simulated games.`] : []),
+      ...(outs.length ? [] : ["No one in either rotation is on the injury report."]),
     ],
+    sections: gameWriteup(slate, g, ctx, pts),
     parlay: sim ? { joint: sim.joint, independent: sim.independent, draws: sim.draws } : undefined,
-    suggestions: [`${g.away} props`, `${g.home} props`, `${g.away} ${g.home} parlay`] };
+    suggestions: [`${g.away} props`, `${g.home} props`, `${g.away} ${g.home} parlay`, ...(its[0] ? [`Why ${its[0].row.player_name} ${its[0].side}?`] : [])] };
+}
+
+const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
+/** Why one team is favored: the book's line, what the player projections add up to, rotation, injuries, pace and rest. */
+function gameWriteup(slate: Slate, g: NbaGame, ctx: AskContext, pts: (t: string) => number): Section[] {
+  const rs = slate.rows.filter((r) => r.game_id === g.game_id);
+  const prs = (t: string) => rs.filter((r) => r.team === t && r.market === "points");
+  const ph = pts(g.home), pa = pts(g.away);
+  const sp = g.home_spread;
+  const fav = sp == null || sp === 0 ? (ph >= pa ? g.home : g.away) : sp < 0 ? g.home : g.away;
+  const dog = fav === g.home ? g.away : g.home;
+  const line: string[] = [];
+  if (sp == null) line.push("No book spread is loaded for this game.");
+  else line.push(sp === 0 ? "The books have it as a pick'em." : `The books make ${fav} a ${Math.abs(sp)}-point favorite${g.total != null ? ` with a total of ${g.total}` : ""}.`);
+  line.push("The Lab does not bet NBA sides or totals; the favorite is the market's call. Below is what our player data says about it.");
+  const proj = [`Our player projections add up to ${g.away} ${fmt(pa, 0)} and ${g.home} ${fmt(ph, 0)} points from the main rotation (bench minutes not counted), a gap of ${fmt(Math.abs(ph - pa), 0)} toward ${ph >= pa ? g.home : g.away}.`];
+  if (sp != null && sp !== 0) proj.push((ph - pa) * -Math.sign(sp) > 0 ? `That points the same way as the line.` : `That points the other way from the line, so the market sees something the rotation sums do not (bench depth, defense, or news after our run).`);
+  const why: string[] = [];
+  for (const t of [fav, dog]) {
+    const top = prs(t).filter((r) => !r.out).sort((a, b) => b.mean - a.mean).slice(0, 3);
+    if (top.length) why.push(`${t}'s top projected scorers: ${top.map((r) => `${r.player_name} ${fmt(r.mean)} (${fmt(r.evidence.minutes, 0)} min)`).join(", ")}.`);
+    const out = prs(t).filter((r) => r.out);
+    if (out.length) why.push(`${t} is without ${out.map((r) => `${r.player_name} (${fmt(r.evidence.minutes_long, 0)} min, ${fmt(avg(r.recent.slice(0, 10)) ?? 0)} points a game over his last ${Math.min(10, r.recent.length)})`).join(", ")}.`);
+    const q = prs(t).filter((r) => r.injury && !r.out);
+    if (q.length) why.push(`${t} uncertain: ${q.map((r) => `${r.player_name} ${r.injury}${r.injury_note ? ` (${r.injury_note})` : ""}`).join(", ")}.`);
+  }
+  const ex = (t: string) => rs.find((r) => r.team === t)?.evidence;
+  const eh = ex(g.home), ea = ex(g.away);
+  if (eh?.pace != null && ea?.pace != null) why.push(`Pace: ${g.away} ${fmt(ea.pace)} possessions a game, ${g.home} ${fmt(eh.pace)}; this one projects about ${fmt((eh.pace + ea.pace) / 2)}.`);
+  const b2b = [g.home, g.away].filter((t) => (ex(t)?.rest ?? 2) <= 1);
+  why.push(b2b.length ? `Second night of a back-to-back: ${b2b.join(" and ")}.` : "Neither team is on the second night of a back-to-back.");
+  why.push(`${g.home} has home court.`);
+  const best = rs.filter(usable).filter((r) => r.evidence.minutes_long >= 20).map((r) => ({ r, l: leanOf(r)! })).filter((x) => x.l).sort((a, b) => b.l.p - a.l.p).slice(0, 4);
+  const props = best.map((x) => `${x.r.player_name} ${x.l.side} ${x.r.line} ${marketLabel(x.r.market).toLowerCase()}, ${score(x.l.p)}/10: ${reasons(x.r, x.l.side).slice(0, 2).join(" ")}`);
+  const t = best[0] ? tierWord(ctx.conf, best[0].l.p) : null;
+  return tidy([
+    { title: "The line", lines: line },
+    { title: "What our projections add up to", lines: proj },
+    { title: `Why ${fav} is favored`, lines: why },
+    { title: "Best props in this game", lines: [...props, ...(t ? [`Top lean: ${t}.`] : [])] },
+  ]);
+}
+
+/** One prop lean in full: the case, the case against, his recent games and how this market has tested. */
+export function explainRow(r: NbaRow, side: "over" | "under", ctx: AskContext): Section[] {
+  const l = leanOf(r);
+  if (!l) return [];
+  const p = side === l.side ? l.p : 1 - l.p;
+  const m = marketLabel(r.market).toLowerCase();
+  const other = side === "over" ? "under" : "over";
+  const e = r.evidence;
+  const pick = [`${sideWord(side)} ${r.line} ${m}: ${score(p)} out of 10. His projected distribution gives the ${side} ${pctS(p)}, and the score is that chance times 10.`];
+  const t = tierWord(ctx.conf, p);
+  if (t) pick.push(`${t}.`);
+  const bm = ctx.conf?.props?.by_market.find((x) => x.market === r.market);
+  if (bm) pick.push(`${bm.label} leans in testing: ${pctS(bm.rate)} of ${bm.n.toLocaleString()} hit${bm.strong_rate != null ? `; the strongest (6.5+) hit ${pctS(bm.strong_rate)} of ${bm.strong_n.toLocaleString()}` : ""}.`);
+  const off = bestOffer(r, side);
+  if (off) {
+    const implied = 1 / (1 + (off.price > 0 ? off.price / 100 : 100 / -off.price));
+    pick.push(`Best price ${off.price > 0 ? "+" : ""}${off.price} at ${bookName(off.book)} implies ${pctS(implied)}; our ${pctS(p)} is ${p - implied >= 0.03 ? `an edge of ${Math.round((p - implied) * 100)} points` : p - implied > -0.03 ? "about the same, so no real edge" : `${Math.round((implied - p) * 100)} points short, so the price is too high`}.`);
+  } else pick.push(r.line_source === "book" ? "Book line, no price loaded for this side." : `No book line loaded: this is his usual line (median of his last 10 games).`);
+  const recent = r.recent.slice(0, 10);
+  const games: string[] = [];
+  if (recent.length) {
+    games.push(`Last ${recent.length}, newest first: ${recent.map((v) => fmt(v, 0)).join(", ")}.`);
+    const a5 = avg(recent.slice(0, 5)), a10 = avg(recent);
+    games.push(`Averages: ${recent.length > 5 ? `last 5 ${fmt(a5 ?? 0)}, ` : ""}last ${recent.length} ${fmt(a10 ?? 0)}; tonight's projection ${fmt(r.mean)} and the line ${r.line}.`);
+    if (r.recent_minutes.length) games.push(`Minutes, last 5: ${r.recent_minutes.slice(0, 5).map((v) => fmt(v, 0)).join(", ")}.`);
+  }
+  const con: string[] = [`${pctS(1 - p)} of his projected outcomes land on the ${other}; 8 in 10 land between ${fmt(r.q10, 0)} and ${fmt(r.q90, 0)}.`];
+  const h = hitRate(r, r.line, other as "over" | "under");
+  if (h && h.hits) con.push(`He went ${other} ${r.line} in ${h.hits} of his last ${h.n}.`);
+  if (e.opp_mult != null && (side === "over" ? e.opp_mult <= 0.97 : e.opp_mult >= 1.03)) con.push(`${r.opp} ${e.opp_mult < 1 ? "gives up less" : "gives up more"} ${m} than average to his position (${Math.round((e.opp_mult - 1) * 100)}%).`);
+  if (e.minutes != null && e.minutes_long != null && (side === "over" ? e.minutes < e.minutes_long - 2 : e.minutes > e.minutes_long + 2)) con.push(`His minutes are ${e.minutes > e.minutes_long ? "up" : "down"} lately (${fmt(e.minutes, 0)} vs ${fmt(e.minutes_long, 0)}).`);
+  if (e.pace != null && e.opp_pace != null) { const pace = (e.pace + e.opp_pace) / 2; if (side === "over" ? pace < 98 : pace > 101) con.push(`Game pace about ${fmt(pace)} possessions, ${pace > 99.5 ? "faster" : "slower"} than average.`); }
+  if (side === "over" && e.rest <= 1) con.push("Second night of a back-to-back.");
+  if (r.injury) con.push(`Injury report: ${r.injury}${r.injury_note ? `, ${r.injury_note}` : ""}.`);
+  const tested: string[] = [];
+  const mr = ctx.markets?.markets.find((x) => x.market === r.market);
+  if (mr) tested.push(`${mr.label} model: ${mr.validated ? "validated" : "research only"} on ${mr.test_rows.toLocaleString()} unseen player-games; typical miss ${fmt(mr.mae)} vs ${fmt(mr.baseline_mae)} for his plain average.`);
+  const pc = ctx.record?.projection_check?.find((x) => x.market === r.market);
+  if (pc) tested.push(`Live check: projections miss by ${fmt(pc.avg_miss)} on average${pc.last7_n ? `; over the last 7 days they ran ${fmt(Math.abs(pc.last7_bias))} ${pc.last7_bias >= 0 ? "high" : "low"} (${pc.last7_n} games)` : ""}.`);
+  const live = ctx.record?.by_market?.find((x) => x.market === r.market);
+  if (live?.n) tested.push(`Live record for ${live.label.toLowerCase()} picks: ${pctS(live.rate)} of ${live.n.toLocaleString()}.`);
+  return tidy([
+    { title: "The pick", lines: pick },
+    { title: `Why the model leans ${side}`, lines: reasons(r, side) },
+    { title: "His recent games", lines: games },
+    { title: "Working against it", lines: con },
+    { title: "How this market has tested", lines: tested },
+  ]);
 }
 
 function injuryAnswer(slate: Slate, teams: string[]): AskAnswer {
@@ -603,13 +713,14 @@ function metaAnswer(q: string, slate: Slate, ctx: AskContext, hasTeam: boolean):
     return { title: "Things you can ask", items: [], bullets: [
       "Players: \"Brunson props\", \"Will Jokic get 12 rebounds?\", \"Maxey over 25.5 points\", \"Embiid last 5 games\", \"Why is Harden under?\", \"Is Allen playing?\"",
       "Lists: \"Best unders tonight\", \"Safest picks\", \"Who gets 30+ points?\", \"Top rebounders\", \"Guards overs on assists\", \"Hot players\", \"Who is due?\"",
-      "Games: \"Cavs vs Sixers preview\", \"Nuggets props\", \"Injury report\", \"What games are on?\"",
+      "Games: \"Cavs vs Sixers preview\", \"Why are the Knicks favored?\", \"Nuggets props\", \"Injury report\", \"What games are on?\"",
+      "Reasons: \"Why is Harden under?\", \"Break down Jokic's rebounds\", \"How confident are you in Brunson over 25.5?\", \"Why are these your best picks?\"",
       "Parlays: \"3-leg parlay\", \"Safe 2-leg\", \"Same-game parlay Thunder\", \"Parlay Mitchell and Embiid\", \"Double-double chances\"",
       "About the site: \"How accurate is it?\", \"How do the scores work?\", \"What is Due?\""] };
   }
   return null;
 }
 
-export const SUGGESTIONS = ["Safest picks tonight", "Best unders", "Strongest overs on points", "3-leg parlay", "Who gets 10+ rebounds?",
+export const SUGGESTIONS = ["Safest picks tonight", "Why are these your best picks?", "Best unders", "Strongest overs on points", "3-leg parlay", "Who gets 10+ rebounds?",
   "Who is due?", "Injury report", "Double-double chances", "How accurate is it?", "Help"];
 export const ALL_MARKETS = NBA_MARKETS.map((m) => m.market);

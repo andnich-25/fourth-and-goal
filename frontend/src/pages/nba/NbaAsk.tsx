@@ -8,6 +8,8 @@ import { toAmerican } from "@/lib/sim";
 import { PageTitle } from "@/components/Layout";
 import { Button, Card, CardBody, CardHeader, Input, LoadingBlock } from "@/components/ui";
 import { TierBadge } from "@/components/shared";
+import { WriteUp } from "@/components/WriteUp";
+import { AiCard, AiKeyLink, AiToggle, KeyPanel, useAiAnswer, useAiMode } from "@/components/AiAsk";
 import { Headshot, NotPublished } from "./shared";
 
 export default function NbaAsk() {
@@ -21,9 +23,14 @@ export default function NbaAsk() {
   const record = useNba<NbaRecord>("record.json");
   const due = useNba<NbaDue>("due.json");
   const ask = (text: string) => { setQ(text); setSp({ q: text }, { replace: true }); };
+  const ai = useAiMode();
   const a = React.useMemo(() => (asked && slate.data
     ? answer(asked, slate.data, cor.data?.buckets, !!cor.data?.use_correlation, { conf: conf.data, markets: markets.data, record: record.data, due: due.data })
     : null), [asked, slate.data, cor.data, conf.data, markets.data, record.data, due.data]);
+  const run = React.useMemo(() => (slate.data ? (text: string, onStatus: (s: string) => void) => import("@/lib/nbaAskAi")
+    .then((m) => m.askNbaAi(ai.key, { slate: slate.data!, cor: cor.data, ctx: { conf: conf.data, markets: markets.data, record: record.data, due: due.data } }, text, [], onStatus)) : null),
+  [slate.data, cor.data, conf.data, markets.data, record.data, due.data, ai.key]);
+  const aiAns = useAiAnswer(asked, ai.on, run);
   if (slate.isError) return <NotPublished error={slate.error} />;
   return (
     <div className="space-y-5">
@@ -33,15 +40,20 @@ export default function NbaAsk() {
           <MessageCircleQuestion className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted" aria-hidden />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask about tonight's props" className="pl-9" aria-label="Question" />
         </div>
+        <AiToggle ai={ai} />
         <Button type="submit" variant="primary">Ask</Button>
       </form>
+      <div className="-mt-3 text-right"><AiKeyLink ai={ai} /></div>
+      {ai.showKey && <KeyPanel keyValue={ai.key} onSave={ai.save} />}
       <div className="flex flex-wrap gap-2">
         {SUGGESTIONS.map((s) => <button key={s} onClick={() => ask(s)} className="rounded-full border border-line px-3 py-1 text-xs text-muted hover:text-fg">{s}</button>)}
       </div>
       {!slate.data && <Card><LoadingBlock rows={4} className="p-5" /></Card>}
-      {a && (
+      {aiAns && <AiCard text={aiAns.text} status={aiAns.status} error={aiAns.error} />}
+      {a && (!aiAns || aiAns.error) && (
         <Card>
           <CardHeader title={a.title} subtitle={a.text} />
+          {!!a.sections?.length && <WriteUp sections={a.sections} />}
           {!!a.bullets?.length && (
             <CardBody className="border-b border-line text-sm">
               <ul className="list-disc space-y-1 pl-5 text-muted">{a.bullets.map((b) => <li key={b}>{b}</li>)}</ul>
@@ -67,7 +79,7 @@ export default function NbaAsk() {
                 </div>
               </Link>
             ))}
-            {!a.items.length && !a.text && !a.bullets?.length && <p className="p-4 text-sm text-muted">Nothing matches. Try one of the suggestions.</p>}
+            {!a.items.length && !a.text && !a.bullets?.length && !a.sections?.length && <p className="p-4 text-sm text-muted">Nothing matches. Try one of the suggestions.</p>}
           </div>
           {!!a.suggestions?.length && (
             <CardBody className="flex flex-wrap gap-2 border-t border-line">
