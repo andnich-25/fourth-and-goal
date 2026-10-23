@@ -134,19 +134,43 @@ def _summarize_pbp(src, dest, log=print, keep: bool = True) -> None:
 
 
 # --------------------------------------------------------------------------- ESPN scoreboard and poll
+def _scoreboard(start: datetime, log=print) -> tuple[dict, dict]:
+    """ESPN's FBS scoreboard for the eight days from `start`. The one-call date range is tried first; when ESPN turns it
+    down (it has answered 400 to ranges), each day is asked for on its own and the games are merged."""
+    url = f"{sources.ESPN}/scoreboard"
+    span = {"dates": f"{start:%Y%m%d}-{start + timedelta(days=7):%Y%m%d}", "groups": "80"}
+    try:
+        data, _ = _get_json(url, span)
+        return data, span  # type: ignore[return-value]
+    except Exception as ex:  # noqa: BLE001 - fall back to one call per day
+        log(f"cfb: scoreboard range refused ({ex}); asking day by day")
+    events, errors = {}, []
+    for i in range(8):
+        d = f"{start + timedelta(days=i):%Y%m%d}"
+        try:
+            data, _ = _get_json(url, {"dates": d, "groups": "80"})
+        except Exception as ex:  # noqa: BLE001
+            errors.append(f"{d}: {ex}")
+            continue
+        for e in data.get("events", []):  # type: ignore[union-attr]
+            events.setdefault(e.get("id"), e)
+    if not events and errors:
+        raise RuntimeError("; ".join(errors[:3]))
+    return {"events": list(events.values())}, {"dates": "by day", "groups": "80", "errors": errors}
+
+
 def save_espn(day: str, log=print) -> dict:
     """The next eight days of FBS games with ESPN's posted lines and AP ranks, and the latest AP poll."""
     out = {}
     start = datetime.fromisoformat(day)
-    span = f"{start:%Y%m%d}-{start + timedelta(days=7):%Y%m%d}"
-    targets = {"scoreboard": (f"{sources.ESPN}/scoreboard", {"dates": span, "groups": "80", "limit": "400"}),
-               "rankings": (f"{sources.ESPN}/rankings", None)}
-    for name, (url, params) in targets.items():
+    targets = {"scoreboard": lambda: _scoreboard(start, log),
+               "rankings": lambda: (_get_json(f"{sources.ESPN}/rankings")[0], None)}
+    for name, get in targets.items():
         dest = sources.archive_dir() / name / f"{day}.json"
         try:
-            data, _ = _get_json(url, params)
+            data, params = get()
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(json.dumps({"fetched_at": utcnow(), "source": url, "params": params, "data": data}))
+            dest.write_text(json.dumps({"fetched_at": utcnow(), "source": f"{sources.ESPN}/{name}", "params": params, "data": data}))
             n = len(data.get("events" if name == "scoreboard" else "rankings", []))  # type: ignore[union-attr]
             out[name] = {"saved": dest.name, "items": n}
             log(f"cfb: saved {name} for {day} ({n})")

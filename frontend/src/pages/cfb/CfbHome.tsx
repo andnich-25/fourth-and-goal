@@ -2,10 +2,10 @@ import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { MessageCircleQuestion } from "lucide-react";
 import { pct } from "@/lib/format";
-import { MARKET_LABEL, dayOf, fmtPrice, kick, useCfb, type Backtest, type CfbGame, type CfbStatus, type Week } from "@/lib/cfb";
+import { dayOf, fmtPrice, kick, useCfb, type Backtest, type CfbGame, type CfbStatus, type Week } from "@/lib/cfb";
 import { PageTitle } from "@/components/Layout";
-import { Badge, Card, CardBody, CardHeader, Input, LoadingBlock, Notice } from "@/components/ui";
-import { LeanRow, Matchup, MatchupRow, NotPublished, roiText } from "./shared";
+import { Badge, Card, CardBody, CardHeader, Input, LoadingBlock } from "@/components/ui";
+import { LeanRow, Matchup, MatchupRow, NotPublished, RatingKey, roiText } from "./shared";
 
 export default function CfbHome() {
   const week = useCfb<Week>("week.json");
@@ -13,13 +13,13 @@ export default function CfbHome() {
   const status = useCfb<CfbStatus>("status.json");
   const nav = useNavigate();
   const [q, setQ] = React.useState("");
+  const [allPicks, setAllPicks] = React.useState(false);
   if (week.isError) return <NotPublished error={week.error} />;
   const w = week.data;
   const games = (w?.games ?? []).filter((g) => g.featured);
+  const top = (w?.picks ?? []).filter((p) => p.score >= 7);
   const byDay = new Map<string, CfbGame[]>();
   for (const g of games) byDay.set(dayOf(g.date), [...(byDay.get(dayOf(g.date)) ?? []), g]);
-  const totals = bt.data?.markets.total;
-  const strong = totals?.tiers.find((t) => t.proven);
   return (
     <div className="space-y-5">
       <PageTitle kicker={w?.games[0] ? `College football ${status.data?.season ?? ""} · Week ${w.games[0].week}` : "College football"} title="This week" />
@@ -31,32 +31,25 @@ export default function CfbHome() {
 
       {w && (
         <Card>
-          <CardHeader title="Picks"
-            subtitle={strong ? `Only tiers that beat the -110 break-even on games the model never saw. ${MARKET_LABEL.total} picks in this tier hit ${pct(strong.rate, 1)} of ${strong.n.toLocaleString()} (${pct(strong.recent_rate, 1)} the last two seasons).` : "Only tiers that beat the -110 break-even on games the model never saw."} />
+          <CardHeader title="Top picks" subtitle="This week's bets rated 7 or better, from markets that beat the books in testing."
+            action={top.length > 6 ? <button type="button" className="text-sm text-accent hover:underline" onClick={() => setAllPicks((v) => !v)}>{allPicks ? "Show fewer" : `All ${top.length}`}</button> : undefined} />
+          <RatingKey className="border-b border-line px-4 py-2" />
           <div className="divide-y divide-line/60">
-            {w.picks.map((p) => (
-              <LeanRow key={`${p.game_id}-${p.market}-${p.team ?? ""}`} m={p} bt={bt.data} to={`/cfb/game/${p.game_id}`}
+            {top.slice(0, allPicks ? undefined : 6).map((p) => (
+              <LeanRow key={`${p.game_id}-${p.market}-${p.team ?? ""}`} m={p} bt={bt.data} to={`/cfb/game/${p.game_id}`} simple
                 sub={<>{p.away} at {p.home} · {kick(p.date)}</>} />
             ))}
           </div>
-          {!w.picks.length && <CardBody className="text-sm text-muted">No game reaches a proven tier yet. Picks appear when books post lines (Tuesday and Saturday pulls, ESPN daily).</CardBody>}
+          {!top.length && <CardBody className="text-sm text-muted">No bet rates 7+ yet. Picks appear as books post lines (ESPN daily, every sportsbook Tuesday and Saturday).</CardBody>}
         </Card>
       )}
 
       {w && <UpsetWatch games={w.games} bt={bt.data} />}
 
-      {bt.data && (
-        <Notice title="What the backtest says">
-          Game totals are where the model earns its keep{strong ? ` (${pct(strong.rate, 1)} at the closing line, better at the opening line, so bet totals early in the week)` : ""}.
-          {bt.data.upsets?.value_bets ? ` Underdog moneylines where the model's win chance clearly beats the price returned ${roiText(bt.data.upsets.value_bets.roi)} per bet, with losing seasons along the way.` : ""}
-          {" "}Closing spreads were too sharp: no tier beat the price over {bt.data.first_season}-{bt.data.last_season}, so they are shown as leans, never as picks.
-          {" "}<Link to="/cfb/research" className="text-accent hover:underline">See the research</Link>
-        </Notice>
-      )}
 
       {w && (
         <Card>
-          <CardHeader title="Featured games" subtitle="Ranked matchups: model score, then the simulation's spread, total and moneyline picks, each rated out of 10. Green picks are proven."
+          <CardHeader title="Featured games" subtitle="Ranked matchups: the simulation's spread, over/under and moneyline picks, each rated out of 10."
             action={<Link to="/cfb/games" className="text-sm text-accent hover:underline">All {w.games.length} games</Link>} />
           {[...byDay.entries()].map(([day, gs]) => (
             <div key={day}>
@@ -81,12 +74,12 @@ export default function CfbHome() {
 /** Underdogs the model gives a real chance, best first. "Upset pick" only when the proven moneyline value tier backs the dog. */
 function UpsetWatch({ games, bt }: { games: CfbGame[]; bt?: Backtest }) {
   const dogs = games.filter((g) => g.upset && (g.upset.pick || g.upset.p >= 0.3))
-    .sort((a, b) => Number(b.upset!.pick) - Number(a.upset!.pick) || b.upset!.p - a.upset!.p).slice(0, 8);
+    .sort((a, b) => Number(b.upset!.pick) - Number(a.upset!.pick) || b.upset!.p - a.upset!.p).slice(0, 5);
   const vb = bt?.upsets?.value_bets;
   return (
     <Card>
       <CardHeader title="Upset watch"
-        subtitle={vb ? `Underdogs with the best chance to win outright. Upset picks are dogs priced well below the model's chance: that tier returned ${roiText(vb.roi)} over ${vb.n.toLocaleString()} bets (${pct(vb.win, 0)} won), not every season.`
+        subtitle={vb ? `Underdogs most likely to win outright. "Upset pick" = the price pays more than the sims say it should (${roiText(vb.roi)} per bet in testing).`
           : "Underdogs with the best chance to win outright, from 5,000 simulated games."} />
       <div className="divide-y divide-line/60">
         {dogs.map((g) => {
