@@ -50,3 +50,15 @@ def test_volume_factor_uses_only_earlier_weeks():
     assert 1.0 < adj["pass_adj"] < 40 / 32
     assert adj["rush_adj"] == 1.0
     assert gamesim.volume_factor(f, 2026, 1) == {"pass_adj": 1.0, "rush_adj": 1.0}
+
+
+def test_share_of_a_back_sitting_out_goes_to_the_backs_playing():
+    rows = _team()
+    rows.loc[rows.player_id == "rb", "carries_share"] = 0.45  # his usual share while a second back (now out) played
+    off = gamesim.simulate_team(rows, np.random.default_rng(3), n=4000, params={"fill_car": 0.0})
+    on = gamesim.simulate_team(rows, np.random.default_rng(3), n=4000, params={"fill_car": 1.0})
+    assert on["rb"]["carries"].mean() > off["rb"]["carries"].mean() * 1.3
+    # Shares that already add up to a full team are left alone.
+    full = gamesim.simulate_team(_team(), np.random.default_rng(3), n=4000, params={"fill_tgt": 1.0})
+    base = gamesim.simulate_team(_team(), np.random.default_rng(3), n=4000, params={"fill_tgt": 0.0})
+    assert full["wr1"]["targets"].mean() >= base["wr1"]["targets"].mean()

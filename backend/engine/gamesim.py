@@ -33,8 +33,13 @@ LEAGUE = {"catch_rate": 0.65, "ypr": 10.8, "ypc": 4.3, "int_rate": 0.023, "td_ra
 # about 7% of targets away from the listed receivers, whose shares already sum to about 1 (2% tested better on every
 # past week for receiving; carries kept 4%, which tested better than 2%).
 # pass_adj / rush_adj: league-wide volume correction learned from recent finished weeks (volume_factor), 1.0 = none.
+# fill_car / fill_tgt: when a team's listed players' shares sum to less than 1 (a back or receiver is sitting out), their
+# share goes to the players who are playing instead of to "other". Found in the 2026 W7 NE-CHI review (Swift got 22 of 30
+# carries with Monangai out; the sim gave him 12). Better simulated log loss for carries, rushing and receiving in every
+# season 2021-2026, and a larger blend gain.
 PARAMS = {"alpha_tgt": 12.0, "alpha_car": 10.0, "k_rec": 0.6, "k_rush": 0.5, "vol_sd": 0.2, "pass_slope": 0.0, "rush_slope": 0.0,
-          "script_sd": 0.0, "other_min_tgt": 0.02, "other_min_car": 0.04, "pass_adj": 1.0, "rush_adj": 1.0}
+          "script_sd": 0.0, "other_min_tgt": 0.02, "other_min_car": 0.04, "pass_adj": 1.0, "rush_adj": 1.0,
+          "fill_car": 1.0, "fill_tgt": 1.0}
 
 SIM_MARKETS = ["pass_yards", "pass_attempts", "completions", "pass_tds", "interceptions", "rush_yards", "carries",
                "rec_yards", "receptions", "rush_rec_yards"]
@@ -80,6 +85,9 @@ def simulate_team(rows: pd.DataFrame, rng, n: int = N_SIMS, params: dict | None 
     # Receivers: targets shared out, then catches and yards from each player's efficiency vs this defense.
     rec_idx = np.where(np.isin(pos, ["RB", "WR", "TE"]))[0]
     tgt_share = _num(rows.targets_share.iloc[rec_idx]) * _num(rows.opp_targets_mult.iloc[rec_idx], 1.0)
+    gap = 1.0 - P["other_min_tgt"] - tgt_share.sum()
+    if P["fill_tgt"] > 0 and gap > 0 and tgt_share.sum() > 0:
+        tgt_share = tgt_share * (1.0 + P["fill_tgt"] * gap / tgt_share.sum())
     other = max(P["other_min_tgt"], 1.0 - tgt_share.sum())
     shares = np.append(tgt_share, other)
     shares /= shares.sum()
@@ -107,6 +115,9 @@ def simulate_team(rows: pd.DataFrame, rng, n: int = N_SIMS, params: dict | None 
     # Rushers: carries shared out among the backs and quarterback.
     rush_idx = np.where(np.isin(pos, ["QB", "RB"]))[0]
     car_share = _num(rows.carries_share.iloc[rush_idx]) * _num(rows.opp_carries_mult.iloc[rush_idx], 1.0)
+    gap = 1.0 - P["other_min_car"] - car_share.sum()
+    if P["fill_car"] > 0 and gap > 0 and car_share.sum() > 0:  # carries left by backs who are not playing go to those who are
+        car_share = car_share * (1.0 + P["fill_car"] * gap / car_share.sum())
     other = max(P["other_min_car"], 1.0 - car_share.sum())
     shares = np.append(car_share, other)
     shares /= shares.sum()
@@ -392,6 +403,12 @@ def attach(c, frame: pd.DataFrame, season: int, week: int, run_id: str, log=prin
     rep = latest()
     adopted = {m: r["weights"] for m, r in (rep or {}).get("markets", {}).items() if r.get("adopt") and r.get("weights")}
     rows = frame[(frame.season == season) & (frame.week == week)]
+    # Past weeks only hold players who suited up, so players ruled out (inactive or Out/Doubtful) sit out here too and
+    # their share goes to the rest, as in the walk-forward test.
+    st_ = rows["status"] if "status" in rows else pd.Series(index=rows.index, dtype=object)
+    rs_ = rows["report_status"] if "report_status" in rows else pd.Series(index=rows.index, dtype=object)
+    out_ = (st_.notna() & st_.ne("ACT")) | rs_.isin(props.PASS_ON)
+    rows = rows[~out_]
     adj = volume_factor(frame, season, week)
     sims = simulate_week(rows, n, seed=season * 100 + week, params=adj)
     log(f"gamesim: league volume correction from recent weeks: passes x{adj['pass_adj']}, carries x{adj['rush_adj']}")
