@@ -1,7 +1,7 @@
 """The Lab rating: every lean scored out of 10, from the simulations and what similar leans did in the past.
 
 1. The 5,000-game simulation gives the model's chance for the side it likes.
-2. That chance is calibrated on past results: an isotonic fit, per market, of how much of the simulation's edge over
+2. That chance is calibrated on past results: an isotonic fit, per market (moneyline underdogs and favorites apart), of how much of the simulation's edge over
    the market's own chance leans really kept (recent seasons count most). A simulation that says 58% on a -110 total,
    when leans like it won 53%, becomes 53%; an underdog the market gives 30% and the simulation 40% becomes whatever
    dogs like it really won.
@@ -25,6 +25,14 @@ HALF_LIFE = 2.0        # seasons
 BANDS = [(0, 5), (5, 7), (7, 8), (8, 9), (9, 10.01)]
 
 
+def cal_key(market: str, dec: float | None) -> str:
+    """Moneyline underdogs and favorites are calibrated apart: the simulation's edge held up differently on each
+    (walk-forward 2018-2025, see CFB.md), and one shared fit rated short favorites too high."""
+    if market != "moneyline":
+        return market
+    return "moneyline_dog" if (dec or DEC110) > 2 else "moneyline_fav"
+
+
 def legs_from_backtest(bt: pd.DataFrame) -> pd.DataFrame:
     """Every graded lean of the game-line backtest: chance, market's chance (q), decimal price, won, season."""
     g = report.graded(bt)
@@ -38,6 +46,7 @@ def legs_from_backtest(bt: pd.DataFrame) -> pd.DataFrame:
         legs.append(ml[["p", "won", "season"]].assign(market="moneyline", dec=history.decimal(ml.price.to_numpy()), q=q))
     L = pd.concat(legs, ignore_index=True)
     L["ret"] = L.won * L.dec - 1
+    L["cal"] = [cal_key(m, d) for m, d in zip(L.market, L.dec)]
     return L
 
 
@@ -48,10 +57,12 @@ def _iso(t: pd.DataFrame, w: np.ndarray) -> IsotonicRegression:
 
 def fit(L: pd.DataFrame) -> dict:
     """Calibrations per market and the reference spread of expected returns, from every lean in L."""
+    if "cal" not in L:
+        L = L.assign(cal=L.market)
     last = L.season.max()
     w = 0.5 ** ((last - L.season) / HALF_LIFE)
     cal, ref = {}, []
-    for m, t in L.groupby("market"):
+    for m, t in L.groupby("cal"):
         iso = _iso(t, w[t.index].to_numpy())
         cal[m] = [iso.X_thresholds_.round(4).tolist(), iso.y_thresholds_.round(4).tolist()]
         ref.append((t.q.to_numpy() + iso.predict((t.p - t.q).to_numpy())) * t.dec.to_numpy() - 1)
@@ -60,7 +71,7 @@ def fit(L: pd.DataFrame) -> dict:
 
 
 def calibrated(r: dict, market: str, p: float, q: float = 0.5) -> float:
-    xs, ys = r["cal"].get(market, [[-1, 1], [-1, 1]])
+    xs, ys = r["cal"].get(market, r["cal"].get(market.split("_")[0], [[-1, 1], [-1, 1]]))
     return float(np.clip(q + np.interp(p - q, xs, ys), 0, 1))
 
 
@@ -68,7 +79,7 @@ def rate(r: dict, market: str, p: float, dec: float | None, q: float = 0.5) -> d
     """Calibrated chance, expected return per $1 at `dec` (decimal odds) and the rating out of 10. `q` is the market's
     own chance for the side (vig removed; 0.5 for spreads and totals)."""
     dec = dec or DEC110
-    pc = calibrated(r, market, p, q)
+    pc = calibrated(r, cal_key(market, dec), p, q)
     ev = pc * dec - 1
     rating = 10 * float(np.searchsorted(r["ref"], ev, side="right")) / len(r["ref"])
     return {"fair_p": round(pc, 4), "ev": round(ev, 4), "rating": round(min(rating, 10.0), 1)}
@@ -76,6 +87,8 @@ def rate(r: dict, market: str, p: float, dec: float | None, q: float = 0.5) -> d
 
 def walk_forward(L: pd.DataFrame, min_seasons: int = 2) -> pd.DataFrame:
     """Every season rated with calibrations and references fit on earlier seasons only."""
+    if "cal" not in L:
+        L = L.assign(cal=L.market)
     out = []
     for s in sorted(L.season.unique()):
         tr = L[L.season < s]
@@ -83,7 +96,7 @@ def walk_forward(L: pd.DataFrame, min_seasons: int = 2) -> pd.DataFrame:
             continue
         r = fit(tr)
         te = L[L.season == s].copy()
-        pc = np.array([calibrated(r, m, p, q) for m, p, q in zip(te.market, te.p, te.q)])
+        pc = np.array([calibrated(r, m, p, q) for m, p, q in zip(te.cal, te.p, te.q)])
         te["ev"] = pc * te.dec - 1
         te["rating"] = 10 * np.searchsorted(r["ref"], te.ev, side="right") / len(r["ref"])
         out.append(te)

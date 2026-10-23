@@ -268,7 +268,7 @@ def upsets(bt: pd.DataFrame, seed: int = 0) -> dict:
                          "actual": float(t.won.mean())})
     ml = moneyline_bets(bt)
     v = ml[ml.ev >= ML_TIERS[1][1]]
-    out = {"calibration": bins, "dogs": int(len(d)), "dog_win_rate": float(d.won.mean())}
+    out = {"calibration": bins, "dogs": int(len(d)), "dog_win_rate": float(d.won.mean()), "drivers": upset_drivers(bt)}
     if len(v):
         wk = v.season.astype(str) + "-" + bt.loc[v.index, "week"].astype(str)
         gs = v.groupby(wk).ret.agg(["sum", "size"])
@@ -289,3 +289,28 @@ def upsets(bt: pd.DataFrame, seed: int = 0) -> dict:
                                            for s, x in v.groupby("season")],
                              "by_price": bands}
     return out
+
+
+UPSET_LINE = 2.5    # an underdog of 2.5+ points winning counts as an upset
+DRIVERS = [("to", "Won the turnover battle", -1), ("epa", "Better EPA per play", 1), ("sr", "Better success rate", 1),
+           ("expl", "More explosive plays", 1)]
+
+
+def upset_drivers(g: pd.DataFrame, min_line: float | None = None) -> dict:
+    """What decided games against a favorite of `min_line`+ points: how often the underdog was ahead in each part of
+    the game when it won, and when it lost. In-game stats explain upsets after the fact; they are not pregame inputs."""
+    min_line = UPSET_LINE if min_line is None else min_line
+    f = g[g.final & g.spread.notna() & (g.spread.abs() >= min_line) & (g.margin != 0)] if "final" in g else g
+    dog_home = f.spread > 0
+    won = np.where(dog_home, f.margin > 0, f.margin < 0)
+    rows = []
+    for col, label, sign in DRIVERS:
+        h, a = f.get(f"home_{col}"), f.get(f"away_{col}")
+        if h is None or a is None:
+            continue
+        edge = sign * np.where(dog_home, h - a, a - h)
+        ok = ~np.isnan(edge)
+        if ok.sum() < 50:
+            continue
+        rows.append({"driver": label, "upsets": float(np.mean(edge[ok & won] > 0)), "others": float(np.mean(edge[ok & ~won] > 0))})
+    return {"games": int(len(f)), "upsets": int(won.sum()), "min_line": min_line, "rows": rows}

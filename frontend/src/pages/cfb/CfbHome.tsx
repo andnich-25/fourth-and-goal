@@ -17,7 +17,8 @@ export default function CfbHome() {
   if (week.isError) return <NotPublished error={week.error} />;
   const w = week.data;
   const games = (w?.games ?? []).filter((g) => g.featured);
-  const top = (w?.picks ?? []).filter((p) => p.score >= 7);
+  // each game's single highest-rated bet, only where it reaches 7 (picks arrive sorted by rating)
+  const top = (w?.picks ?? []).filter((p, i, all) => p.score >= 7 && p.proven && all.findIndex((x) => x.game_id === p.game_id) === i);
   const byDay = new Map<string, CfbGame[]>();
   for (const g of games) byDay.set(dayOf(g.date), [...(byDay.get(dayOf(g.date)) ?? []), g]);
   return (
@@ -31,7 +32,7 @@ export default function CfbHome() {
 
       {w && (
         <Card>
-          <CardHeader title="Top picks" subtitle="This week's bets rated 7 or better, from markets that beat the books in testing."
+          <CardHeader title="Top picks" subtitle="Each game's best bet, when it rates 7 or better: the band that beat the books in testing."
             action={top.length > 6 ? <button type="button" className="text-sm text-accent hover:underline" onClick={() => setAllPicks((v) => !v)}>{allPicks ? "Show fewer" : `All ${top.length}`}</button> : undefined} />
           <RatingKey className="border-b border-line px-4 py-2" />
           <div className="divide-y divide-line/60">

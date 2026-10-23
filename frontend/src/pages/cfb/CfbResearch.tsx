@@ -180,6 +180,25 @@ function ReportCardView({ c }: { c: ReportCard }) {
                 </table>
               </div>
             )}
+            {!!c.upsets?.length && (
+              <div className="overflow-x-auto">
+                <div className="font-medium">Upsets: what the model saw, and what decided them</div>
+                <p className="text-xs text-muted">Underdogs of 2.5+ points that won. "Model edge" is how many points closer than the line the model had the dog before kickoff; the rest is what the dog did better in the game.</p>
+                <table className="mt-1 w-full">
+                  <thead><tr className="text-xs text-muted"><th className="text-left font-medium">Upset</th><th className="text-right font-medium">Line</th><th className="text-right font-medium">Model edge</th><th className="text-right font-medium">Dog's rating</th><th className="pl-3 text-left font-medium">Dog was better at</th></tr></thead>
+                  <tbody>{c.upsets.map((u) => {
+                    const better = Object.entries(u.edges).filter(([, v]) => v > 0).map(([k]) => k.replace(/^(Won the |Better |More )/, "")).join(", ");
+                    return (
+                      <tr key={u.label + u.date} className="border-t border-line/60 align-top"><td className="py-1 pr-3">{u.dog} <span className="text-muted">({u.label})</span></td>
+                        <td className="text-right tabular-nums">+{u.line}</td>
+                        <td className={`text-right tabular-nums ${u.model_edge > 0 ? "text-ok" : ""}`}>{u.model_edge > 0 ? "+" : ""}{u.model_edge.toFixed(1)}</td>
+                        <td className="text-right tabular-nums">{u.rated != null ? u.rated.toFixed(1) : "–"}</td>
+                        <td className="pl-3 text-xs">{better || "none of these: a bounce or special teams"}</td></tr>
+                    );
+                  })}</tbody>
+                </table>
+              </div>
+            )}
             {!!c.props?.length && (
               <div className="overflow-x-auto">
                 <div className="font-medium">Player props</div>
@@ -214,6 +233,21 @@ function UpsetResearch({ u }: { u: Upsets }) {
             ))}</tbody>
           </table>
         </div>
+        {!!u.drivers?.rows.length && (
+          <div>
+            <div className="font-medium">What decides upsets</div>
+            <p className="text-xs text-muted">{u.drivers.games.toLocaleString()} games with a favorite of {u.drivers.min_line}+ points; the underdog won {u.drivers.upsets.toLocaleString()}.
+              How often the underdog was ahead in each part of the game:</p>
+            <table className="mt-1 w-full">
+              <thead><tr className="text-xs text-muted"><th className="text-left font-medium">Underdog…</th><th className="text-right font-medium">When it won</th><th className="text-right font-medium">When it lost</th></tr></thead>
+              <tbody>{u.drivers.rows.map((x) => (
+                <tr key={x.driver} className="border-t border-line/60"><td className="py-1">{x.driver}</td><td className="text-right tabular-nums font-medium">{pct(x.upsets, 0)}</td><td className="text-right tabular-nums">{pct(x.others, 0)}</td></tr>
+              ))}</tbody>
+            </table>
+            <p className="mt-1 text-xs text-muted">Turnovers and play-by-play efficiency decide most upsets, and turnovers are mostly luck before kickoff.
+              We also tested rest days, bye weeks, line moves, Elo ratings, recent form against the spread and season stat edges as pregame upset signals: none predicted upsets better than the spread already does, so none were added.</p>
+          </div>
+        )}
         {vb && (
           <>
             <p className="text-muted">Betting the moneyline only when the model's win chance beats the price by a clear margin ({Math.round(vb.dog_share * 100)}% of those bets were on underdogs):

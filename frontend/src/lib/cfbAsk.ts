@@ -3,6 +3,21 @@
 import { MARKET_LABEL, type CfbGame, type CfbMarket, type Lean, type PropRow, type Team, type Week } from "./cfb";
 
 export type AskLean = { game: CfbGame; lean: Lean };
+
+/** Highest rating first; the calibrated chance breaks ties. */
+const byRating = (a: AskLean, b: AskLean) => b.lean.score - a.lean.score || (b.lean.fair_p ?? b.lean.p) - (a.lean.fair_p ?? a.lean.p);
+
+/** Each game's single highest-rated lean, best games first. */
+export function topPerGame(leans: AskLean[]): AskLean[] {
+  const best = new Map<number, AskLean>();
+  for (const x of leans) {
+    const b = best.get(x.game.game_id);
+    if (!b || byRating(x, b) < 0) best.set(x.game.game_id, x);
+  }
+  return [...best.values()].sort(byRating);
+}
+/** A pick: rated 7+ (only proven markets and tiers can reach 7). */
+export const isPick = (m: Lean) => m.proven && m.score >= 7;
 export type AskAnswer = { title: string; text?: string; leans: AskLean[]; teams: Team[]; props: PropRow[] };
 
 export const SUGGESTIONS = ["Best picks this week", "Best unders", "Biggest overs", "Alabama spread", "Upset picks", "Top 10 teams",
@@ -39,7 +54,7 @@ export function answer(question: string, week: Week, teams: Team[] = [], props: 
   // props
   const pm = PROP_WORDS.find(([re]) => re.test(q))?.[1];
   if (/\bprops?\b/.test(q) || (pm && /\byards|yds|props?|receptions|catches\b/.test(q))) {
-    const rows = props.filter((r) => (!pm || r.market === pm) && (!team || r.team === team || r.opp === team)).sort((a, b) => b.p - a.p);
+    const rows = props.filter((r) => (!pm || r.market === pm) && (!team || r.team === team || r.opp === team)).sort((a, b) => b.score - a.score || b.p - a.p);
     return { ...empty, title: `${pm ? rows[0]?.label ?? "Player" : "Player"} props${team ? `: ${team}` : ""}`, props: rows.slice(0, countOf(q, 12)),
       text: rows.length ? "Featured games only (books post college props for the big games). A prop is a pick only at a posted line in a proven tier." : "No props for that this week: books post them for the featured games only." };
   }
@@ -62,14 +77,14 @@ export function answer(question: string, week: Week, teams: Team[] = [], props: 
     const t = teams.find((x) => x.team === team);
     if (!games.length) return { ...empty, title: team, teams: t ? [t] : [], text: "No game this week." };
     const g = games[0];
-    const leans = g.markets.filter((m) => !market || m.market === market).map((lean) => ({ game: g, lean }));
+    const leans = g.markets.filter((m) => !market || m.market === market).map((lean) => ({ game: g, lean })).sort(byRating);
     const fav = g.line.spread == null ? "no line yet" : g.line.spread <= 0 ? `${g.home} ${g.line.spread}` : `${g.away} ${-g.line.spread}`;
     return { ...empty, title: `${g.away} at ${g.home}`, leans, teams: t ? [t] : [],
       text: `Line: ${fav}, total ${g.line.total ?? "–"}. Model: ${g.away} ${g.model.away.toFixed(1)}, ${g.home} ${g.model.home.toFixed(1)}; ${g.home} wins ${(g.model.home_win * 100).toFixed(0)}% of 5,000 simulations.` };
   }
   if (/\b(ranked|featured|big games?|marquee)\b/.test(q)) {
     const leans = week.games.filter((g) => g.featured).flatMap((game) => game.markets.filter((m) => !market || m.market === market).map((lean) => ({ game, lean })));
-    return { ...empty, title: "Featured games", leans: leans.sort((a, b) => b.lean.p - a.lean.p).slice(0, countOf(q, 15)) };
+    return { ...empty, title: "Featured games: each game's top-rated bet", leans: topPerGame(leans).slice(0, countOf(q, 15)) };
   }
   let pool = all.filter((x) => !market || x.lean.market === market);
   if (/\bunders?\b/.test(q)) pool = pool.filter((x) => x.lean.side === "under");
@@ -78,11 +93,15 @@ export function answer(question: string, week: Week, teams: Team[] = [], props: 
     pool = pool.filter((x) => (x.lean.market === "moneyline" && (x.lean.price ?? 0) > 0) ||
       (x.lean.market === "spread" && (x.lean.line ?? 0) > 0));
   }
-  const proven = pool.filter((x) => x.lean.proven);
+  const label = market ? `${MARKET_LABEL[market].toLowerCase()}s` : "bets";
   const wantPicks = /\b(best|picks?|bets?|lock|locks|top|strongest|confident)\b/.test(q);
-  const list = (wantPicks && proven.length ? proven : pool).sort((a, b) => b.lean.p - a.lean.p).slice(0, countOf(q, 10));
-  const label = market ? MARKET_LABEL[market].toLowerCase() : "leans";
-  return { ...empty, leans: list,
-    title: wantPicks && proven.length ? `Best ${label} (proven tiers)` : `Strongest ${label} this week`,
-    text: wantPicks && !proven.length ? `No ${label} reach a proven tier, so these are the strongest leans, for reference only.` : undefined };
+  if (wantPicks) {
+    // one bet per game (its highest rated), and only picks: rated 7+, the band that beat the books in testing
+    const picks = topPerGame(pool.filter((x) => isPick(x.lean))).slice(0, countOf(q, 10));
+    return { ...empty, leans: picks, title: `Best ${label} this week: rated 7+`,
+      text: picks.length ? "Each game's highest-rated bet, only where it reaches 7 out of 10."
+        : `No ${label} rate 7 or higher right now. Nothing is a pick until it does; ratings update with every new line.` };
+  }
+  return { ...empty, leans: topPerGame(pool).slice(0, countOf(q, 10)), title: `Highest-rated ${label} this week`,
+    text: "Each game's highest-rated bet. Only 7+ are picks." };
 }

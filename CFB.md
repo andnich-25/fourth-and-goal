@@ -45,11 +45,16 @@ record. College football research, not betting advice. No pick is guaranteed.
 ## Lab rating (out of 10)
 
 Every lean (game lines and props) gets a rating from `cfb/rating.py`: the simulated chance is calibrated on past
-results (an isotonic fit, per market, of how much of the simulation's edge over the market's own chance leans really
+results (an isotonic fit, per market, with moneyline underdogs and favorites fit apart, of how much of the simulation's edge over the market's own chance leans really
 kept; recent seasons count most), priced at the best odds on offer, and ranked against every past lean's expected
 return. Leans from markets or tiers that did not beat the price in testing stop at 6.9. Tested walk-forward (each
-season rated with fits from earlier seasons only): 7+ made money (about +1% per bet), under 7 lost about the books'
-cut; 7, 8 and 9 performed about the same. The bands are published in `backtest.json` (`rating`).
+season rated with fits from earlier seasons only): 7+ made money (about +1.6% per bet over 10,400 bets), under 7 lost
+about the books' cut; 7, 8 and 9 performed about the same. The bands are published in `backtest.json` (`rating`).
+Fitting moneyline underdogs and favorites apart (October 2026) raised the 7+ return from +1.1% to +1.6% on unseen
+seasons: one shared fit had rated short favorites too high (favorites rated 7+ had lost 6%). Moneylines count as proven
+on underdogs only (+100 to +300); favorite value bets returned +1% over 159 bets, too few to call an edge.
+
+"Best picks" (home page and Ask) list each game's single highest-rated bet, and only when it rates 7+.
 
 The **All games** tab (`/cfb/games`) lists every game with the simulation's spread, total and moneyline picks in three
 columns, each with its rating and the best book price; the home page shows the featured games the same way.
@@ -70,6 +75,16 @@ priced together from 1,000 of that game's simulated scores (`sims.json`), other 
   three seasons). Pregame vs post-game sim = how far the inputs were off; post-game sim vs final = what no input
   explains. Per-input bias (pace, yards per play, turnovers, EPA, success, explosives) shows which inputs are skewed.
   Every final then joins the next week's refit.
+* **Upsets** (underdog of 2.5+ points wins): each week's report card lists them with the model's pregame edge, the
+  dog's rating and what the dog did better (turnovers, EPA per play, success rate, explosive plays). Over 10,285 games
+  since 2016 the dog won the turnover battle in 62% of upsets (20% of other games) and had better EPA per play in 73%.
+  Pregame upset signals tested against the spread, season by season out of sample (October 2026): rest days, bye
+  weeks, line moves, Elo vs the line, recent form against the spread, and season EPA, success, explosive and turnover
+  edges. None improved on the spread alone, so none were added; the model's own edge and home underdogs helped
+  slightly and are already in it.
+* **Navy and the other option offenses** (October 2026 check): since 2016 the model's average lean toward Navy, Army
+  and Air Force was within half a point of the line, and all three covered more often than not, so there is no
+  option-offense bias to correct.
 
 ## Odds API budget
 

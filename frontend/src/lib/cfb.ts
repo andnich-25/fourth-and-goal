@@ -59,7 +59,11 @@ export function decodeSims(s: string): { h: Int16Array; a: Int16Array } {
   for (let i = 0; i < n; i++) { h[i] = v(i); a[i] = v(n + i); }
   return { h, a };
 }
+export type UpsetDrivers = { games: number; upsets: number; min_line: number; rows: { driver: string; upsets: number; others: number }[] };
+export type WeekUpset = { label: string; date: string; dog: string; line: number; model_dog_win: number; model_edge: number;
+  rated: number | null; edges: Record<string, number> };
 export type Upsets = {
+  drivers?: UpsetDrivers;
   calibration: { lo: number; hi: number; n: number; model: number; market: number; actual: number }[]; dogs: number; dog_win_rate: number;
   value_bets: { n: number; roi: number; win: number; dog_share: number; p_profit: number; roi_ci90: [number, number];
     by_season: { season: number; n: number; roi: number; win: number }[]; by_price: { band: string; n: number; win: number; roi: number }[] } | null;
@@ -90,7 +94,8 @@ export type ReportCard = { games: number; note?: string;
   inputs?: { input: string; n: number; bias: number; mae: number }[];
   by_week?: { date: string; n: number; margin_mae: number; total_mae: number }[];
   biggest_misses?: ScoreLine[];
-  props?: { market: string; label: string; n: number; model_mae: number; line_mae: number; hit: number | null }[] };
+  props?: { market: string; label: string; n: number; model_mae: number; line_mae: number; hit: number | null }[];
+  upsets?: WeekUpset[] };
 export type DataCheck = { check: string; value: string; ok: boolean; games?: number[] };
 export type CfbStatus = { generated_at: string; season: number; games_this_week: number; picks: number; props: number;
   history: { first_season: number; games: number; lined_games: number; last_game_date: string }; proven: Record<CfbMarket, string[]>;

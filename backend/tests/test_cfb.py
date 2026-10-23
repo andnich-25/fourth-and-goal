@@ -194,3 +194,44 @@ def test_scoreboard_falls_back_to_one_day_at_a_time(monkeypatch):
     data, params = collect._scoreboard(datetime(2026, 10, 23), log=lambda *_: None)
     assert len(calls) == 9 and params["dates"] == "by day"
     assert len(data["events"]) == 9        # game "1" listed every day is kept once
+
+
+def test_rating_calibrates_moneyline_dogs_and_favorites_apart():
+    from cfb import rating
+    rng = np.random.default_rng(7)
+    n = 6000
+    dec = np.where(rng.uniform(size=n) < 0.5, 3.0, 1.5)
+    q = 1 / dec
+    p = q + rng.uniform(0, 0.08, n)
+    # the edge held on dogs and was empty on favorites
+    won = (rng.uniform(size=n) < np.where(dec > 2, p, q)).astype(int)
+    L = pd.DataFrame({"p": p, "won": won, "season": rng.integers(2018, 2026, n), "market": "moneyline", "dec": dec, "q": q})
+    L["ret"] = L.won * L.dec - 1
+    L["cal"] = [rating.cal_key(m, d) for m, d in zip(L.market, L.dec)]
+    r = rating.fit(L)
+    assert set(r["cal"]) == {"moneyline_dog", "moneyline_fav"}
+    dog, fav = rating.rate(r, "moneyline", 1 / 3 + 0.06, 3.0, 1 / 3), rating.rate(r, "moneyline", 2 / 3 + 0.06, 1.5, 2 / 3)
+    assert dog["ev"] > 0.08 and abs(fav["ev"]) < 0.05
+
+
+def test_report_card_explains_upsets(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setenv("CFB_ARCHIVE_DIR", str(tmp_path))
+    (tmp_path / "picks").mkdir()
+    snap = {"game_id": 9, "date": "2026-10-24T19:30:00Z", "home": "Navy", "away": "North Texas", "line": {"spread": 2.5, "total": 60},
+            "model": {"margin": -0.6, "total": 63, "home_win": 0.497}, "ratings": {},
+            "markets": [{"market": "moneyline", "side": "home", "team": "Navy", "score": 7.5}], "props": []}
+    (tmp_path / "picks" / "9.json").write_text(json.dumps(snap))
+    g = pd.DataFrame([{"game_id": 9, "final": True, "home_points": 28, "away_points": 24, "home_to": 0, "away_to": 2,
+                       "home_epa": 0.10, "away_epa": 0.20, "home_sr": 0.50, "away_sr": 0.40, "home_expl": 0.05, "away_expl": 0.10}])
+    u = pipeline.report_card(g, pd.DataFrame())["upsets"][0]
+    assert u["dog"] == "Navy" and u["rated"] == 7.5 and u["model_edge"] == 1.9
+    assert u["edges"]["Won the turnover battle"] == 2 and u["edges"]["Better EPA per play"] < 0
+
+
+def test_upset_drivers_counts_how_often_the_dog_was_ahead():
+    from cfb import report
+    g = pd.DataFrame({"final": True, "spread": [7.0] * 60 + [-7.0] * 60, "margin": [3] * 60 + [10] * 60,
+                      "home_to": [0] * 60 + [1] * 60, "away_to": [2] * 60 + [1] * 60})
+    d = report.upset_drivers(g)
+    assert d["upsets"] == 60 and d["rows"][0]["upsets"] == 1.0 and d["rows"][0]["others"] == 0.0
