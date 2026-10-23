@@ -238,7 +238,8 @@ def game_rows(up: pd.DataFrame, ch: dict, summary: dict, lines: dict, qb: dict |
             ev = max(evh, eva)
             price = bh["price"] if home else ba["price"]
             t = tier_of(mk["moneyline"]["tiers"], ev) if ev > 0 else None
-            in_range = report.ML_PRICE_RANGE[0] <= price <= report.ML_PRICE_RANGE[1]
+            # proven on underdogs only: favorite value bets returned +1% over 159 bets, not enough to call an edge
+            in_range = 100 <= price <= report.ML_PRICE_RANGE[1]
             ih, ia = history.implied(np.array([g.ml_home, g.ml_away], float))
             markets.append({"market": "moneyline", "side": "home" if home else "away", "team": g.home_team if home else g.away_team,
                             "p": ph if home else 1 - ph, "market_p": float((ih if home else ia) / (ih + ia)),
@@ -428,6 +429,21 @@ def report_card(g: pd.DataFrame, pg: pd.DataFrame, box=None, pool: np.ndarray | 
                 act = x.get(f"{side}_{stat}")
                 if pre is not None and act == act and act is not None:
                     row[f"err_{key}_{side}"] = float(act) - float(pre)
+        ml = next((m for m in s.get("markets", []) if m.get("market") == "moneyline"), None)
+        if ln.get("spread") is not None and abs(ln["spread"]) >= report.UPSET_LINE:
+            dog_home = ln["spread"] > 0
+            if (margin > 0) == dog_home and margin != 0:      # the underdog won
+                sg = 1 if dog_home else -1
+                edges = {}
+                for col, label, sign in report.DRIVERS:
+                    h, a = x.get(f"home_{col}"), x.get(f"away_{col}")
+                    if h == h and a == a and h is not None and a is not None:
+                        edges[label] = round(float(sign * sg * (h - a)), 3)
+                row["upset"] = {"dog": s["home"] if dog_home else s["away"], "line": abs(ln["spread"]),
+                                "model_dog_win": round(float(s["model"]["home_win"] if dog_home else 1 - s["model"]["home_win"]), 3),
+                                "model_edge": round(float(sg * (s["model"]["margin"] + ln["spread"])), 1),
+                                "rated": (ml["score"] if ml and ml.get("side") == ("home" if dog_home else "away") else None),
+                                "edges": edges}
         games.append(row)
         for p in s.get("props", []):
             a = actual.get((gid, str(p["player_id"])))
@@ -470,6 +486,8 @@ def report_card(g: pd.DataFrame, pg: pd.DataFrame, box=None, pool: np.ndarray | 
                        for dt, x in d.assign(wk=pd.to_datetime(d.date).dt.to_period("W").astype(str)).groupby("wk")],
            "biggest_misses": d.assign(miss=(d.model_total - d.total).abs()).sort_values("miss", ascending=False)
                               .head(5)[["label", "date", "model_total", "total", "model_margin", "margin"]].to_dict("records")}
+    ups = [dict(label=r["label"], date=r["date"], **r["upset"]) for r in games if r.get("upset")]
+    out["upsets"] = sorted(ups, key=lambda u: -u["line"])
     if prow:
         p = pd.DataFrame(prow)
         out["props"] = [{"market": m, "label": props.MARKETS[m], "n": int(len(x)), "model_mae": float((x["mean"] - x.y).abs().mean()),
