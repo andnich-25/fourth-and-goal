@@ -21,7 +21,9 @@ export type CfbGame = {
   home_conf: string | null; away_conf: string | null; neutral: boolean; conference_game: boolean; venue: string | null;
   home_rank: number | null; away_rank: number | null; tv: string | null; featured: boolean;
   line: { spread: number | null; total: number | null; ml_home: number | null; ml_away: number | null; tt_home: number | null;
-    tt_away: number | null; tt_posted: boolean; source: string | null; fetched_at: string | null; has_line: boolean };
+    tt_away: number | null; tt_posted: boolean; source: string | null; fetched_at: string | null; books_at?: string | null; has_line: boolean };
+  /** Each sportsbook's lines from the latest Odds API pull: [point, price] by side. */
+  books?: BookLine[];
   model: { home: number; away: number; margin: number; total: number; margin_q: number[]; total_q: number[]; home_win: number; line_based: boolean };
   ratings: Record<"home" | "away", { pts_for: number | null; ypp: number | null; plays: number | null; epa?: number | null; success?: number | null;
     turnovers?: number | null; explosive?: number | null; games: number | null }>;
@@ -30,6 +32,8 @@ export type CfbGame = {
   upset?: { team: string; side: "home" | "away"; p: number; market: number | null; price: number | null; pick: boolean } | null;
   notes?: string[];
 };
+export type BookLine = { book: string; spread?: Partial<Record<"home" | "away", [number | null, number]>>;
+  total?: Partial<Record<"over" | "under", [number | null, number]>>; ml?: Partial<Record<"home" | "away", [number | null, number]>> };
 export type CfbPick = Lean & { game_id: number; date: string; home: string; away: string };
 export type Week = { generated_at: string; games: CfbGame[]; picks: CfbPick[]; odds: { books_games: number; espn_games: number; no_line: number } };
 
@@ -127,3 +131,6 @@ export const dayOf = (iso: string) => new Date(iso).toLocaleDateString("en-US", 
 export function tierOf(r: MarketReport | undefined, name: string | null | undefined): GameTier | null {
   return r?.tiers.find((t) => t.tier === name) ?? null;
 }
+
+/** "Thu 10:00 AM" style age of a line pull. */
+export const pulled = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" }) : "");

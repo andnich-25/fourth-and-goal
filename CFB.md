@@ -51,7 +51,12 @@ return. Leans from markets or tiers that did not beat the price in testing stop 
 season rated with fits from earlier seasons only): 7+ made money (about +1% per bet), under 7 lost about the books'
 cut; 7, 8 and 9 performed about the same. The bands are published in `backtest.json` (`rating`).
 
-The home page lists every matchup with the moneyline, spread and over/under the model likes, each with its rating.
+The **All games** tab (`/cfb/games`) lists every game with the simulation's spread, total and moneyline picks in three
+columns, each with its rating and the best book price; the home page shows the featured games the same way.
+
+Lines: each game uses the sportsbook consensus while it is under 36 hours old, then today's ESPN BET line (free,
+read every morning), so the line stays current between the Tuesday and Saturday Odds API pulls without spending
+more credits. Game pages show every book's spread, total and moneyline from the last pull.
 The **Parlay builder** (`/cfb/parlay`) offers those legs plus props at book-posted lines; legs from the same game are
 priced together from 1,000 of that game's simulated scores (`sims.json`), other legs multiply.
 

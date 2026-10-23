@@ -58,6 +58,25 @@ def _norm(s: str) -> str:
 
 
 # --------------------------------------------------------------------------- this week's lines
+STALE_HOURS = 36
+
+
+def _hours(a: str, b: str) -> float:
+    pa, pb = (datetime.fromisoformat(x.replace("Z", "+00:00")) for x in (a, b))
+    return (pb - pa).total_seconds() / 3600
+
+
+def book_table(offers: list[dict]) -> list[dict]:
+    """Each sportsbook's spread, total and moneyline for one game (point and price), for the line-shopping table."""
+    out: dict = {}
+    for o in offers:
+        b = out.setdefault(o["book"], {"book": o["book"]})
+        key = {"spreads": "spread", "totals": "total", "h2h": "ml"}.get(o["market"])
+        if key and o.get("price") is not None:
+            b.setdefault(key, {})[o["side"]] = [o.get("point"), int(o["price"])]
+    return sorted(out.values(), key=lambda b: b["book"])
+
+
 def live_lines(today: str) -> dict:
     """Per game: the consensus line from saved sportsbook prices (latest pull in the last week that priced the game),
     falling back to ESPN's posted line from today's scoreboard; every book's offer; team totals and props."""
@@ -67,8 +86,11 @@ def live_lines(today: str) -> dict:
     if not sb.exists():
         older = sorted((arch / "scoreboard").glob("*.json")) if (arch / "scoreboard").exists() else []
         sb = older[-1] if older else None
+    espn_at = None
     if sb:
-        espn = {r["game_id"]: r for r in collect.parse_scoreboard(json.loads(sb.read_text()))}
+        sbj = json.loads(sb.read_text())
+        espn = {r["game_id"]: r for r in collect.parse_scoreboard(sbj)}
+        espn_at = sbj.get("fetched_at")
     books: dict = {}
     tts: dict = {}
     prs: dict = {}
@@ -98,13 +120,19 @@ def live_lines(today: str) -> dict:
         ml = {s: [l for l in ls if l["market"] == "h2h" and l["side"] == s and l["price"] is not None] for s in ("home", "away")}
         mlp = {s: float(history.american(np.median(history.implied(np.array([l["price"] for l in v], float)))))
                if v else None for s, v in ml.items()}
+        # the sportsbook consensus is used while fresh; once it is older than STALE_HOURS, today's ESPN line (a real
+        # book, ESPN BET, read free every day) is the current number and the older book prices stay for reference
+        stale = bool(fetched.get(gid) and espn_at and _hours(fetched[gid], espn_at) > STALE_HOURS)
+        use_books = bool(sp or tot) and not (stale and (e.get("home_spread") is not None or e.get("total") is not None))
+        espn_src = (f"ESPN ({e['provider']})" if e.get("provider") else "ESPN") if e.get("home_spread") is not None or e.get("total") is not None else None
         row = {
-            "spread": float(np.median(sp)) if sp else e.get("home_spread"),
-            "total": float(np.median(tot)) if tot else e.get("total"),
-            "ml_home": mlp["home"] if mlp["home"] is not None else e.get("ml_home"),
-            "ml_away": mlp["away"] if mlp["away"] is not None else e.get("ml_away"),
-            "source": f"{len({l['book'] for l in ls})} sportsbooks" if sp or tot else (f"ESPN ({e['provider']})" if e.get("provider") else "ESPN") if e.get("home_spread") is not None or e.get("total") is not None else None,
-            "fetched_at": fetched.get(gid) or (json.loads(sb.read_text()).get("fetched_at") if sb else None),
+            "spread": float(np.median(sp)) if sp and use_books else e.get("home_spread") if e.get("home_spread") is not None else (float(np.median(sp)) if sp else None),
+            "total": float(np.median(tot)) if tot and use_books else e.get("total") if e.get("total") is not None else (float(np.median(tot)) if tot else None),
+            "ml_home": mlp["home"] if mlp["home"] is not None and use_books else e.get("ml_home") if e.get("ml_home") is not None else mlp["home"],
+            "ml_away": mlp["away"] if mlp["away"] is not None and use_books else e.get("ml_away") if e.get("ml_away") is not None else mlp["away"],
+            "source": f"{len({l['book'] for l in ls})} sportsbooks" if use_books else espn_src,
+            "fetched_at": fetched.get(gid) if use_books else (espn_at or fetched.get(gid)),
+            "books_at": fetched.get(gid),
             "offers": ls, "team_totals": tts.get(gid, []), "props": prs.get(gid, []),
             "home_rank": e.get("home_rank"), "away_rank": e.get("away_rank"), "tv": e.get("tv"),
             "espn_spread": e.get("home_spread"),
@@ -242,7 +270,9 @@ def game_rows(up: pd.DataFrame, ch: dict, summary: dict, lines: dict, qb: dict |
             "home_rank": L.get("home_rank"), "away_rank": L.get("away_rank"), "tv": L.get("tv"), "featured": bool(g.featured),
             "line": {"spread": g.spread, "total": g.total, "ml_home": g.ml_home, "ml_away": g.ml_away,
                      "tt_home": g.tt_home, "tt_away": g.tt_away, "tt_posted": bool(g.tt_home_posted or g.tt_away_posted),
-                     "source": L.get("source"), "fetched_at": L.get("fetched_at"), "has_line": bool(g.spread == g.spread)},
+                     "source": L.get("source"), "fetched_at": L.get("fetched_at"), "books_at": L.get("books_at"),
+                     "has_line": bool(g.spread == g.spread)},
+            "books": book_table(offers),
             "model": {"home": float(ch["home_mean"][i]), "away": float(ch["away_mean"][i]), "margin": float(g.pred_margin),
                       "total": float(g.pred_total), "margin_q": ch["margin_q"][i], "total_q": ch["total_q"][i],
                       "home_win": float(ch["p_home_win"][i]), "line_based": bool(g.spread == g.spread)},

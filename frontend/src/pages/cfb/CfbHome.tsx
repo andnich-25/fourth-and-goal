@@ -1,11 +1,11 @@
 import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { MessageCircleQuestion } from "lucide-react";
-import { cn, pct } from "@/lib/format";
-import { MARKET_LABEL, dayOf, fmtLine, fmtPrice, kick, ranked, useCfb, type Backtest, type CfbGame, type CfbStatus, type Week } from "@/lib/cfb";
+import { pct } from "@/lib/format";
+import { MARKET_LABEL, dayOf, fmtPrice, kick, useCfb, type Backtest, type CfbGame, type CfbStatus, type Week } from "@/lib/cfb";
 import { PageTitle } from "@/components/Layout";
-import { Badge, Card, CardBody, CardHeader, Input, LoadingBlock, Notice, Segmented } from "@/components/ui";
-import { LeanRow, Matchup, NotPublished, RatingMeter, roiText } from "./shared";
+import { Badge, Card, CardBody, CardHeader, Input, LoadingBlock, Notice } from "@/components/ui";
+import { LeanRow, Matchup, MatchupRow, NotPublished, roiText } from "./shared";
 
 export default function CfbHome() {
   const week = useCfb<Week>("week.json");
@@ -13,12 +13,9 @@ export default function CfbHome() {
   const status = useCfb<CfbStatus>("status.json");
   const nav = useNavigate();
   const [q, setQ] = React.useState("");
-  const [show, setShow] = React.useState<"featured" | "all">("featured");
-  const [find, setFind] = React.useState("");
   if (week.isError) return <NotPublished error={week.error} />;
   const w = week.data;
-  const games = (w?.games ?? []).filter((g) => (show === "all" || g.featured || find) &&
-    (!find || `${g.home} ${g.away}`.toLowerCase().includes(find.toLowerCase())));
+  const games = (w?.games ?? []).filter((g) => g.featured);
   const byDay = new Map<string, CfbGame[]>();
   for (const g of games) byDay.set(dayOf(g.date), [...(byDay.get(dayOf(g.date)) ?? []), g]);
   const totals = bt.data?.markets.total;
@@ -59,16 +56,15 @@ export default function CfbHome() {
 
       {w && (
         <Card>
-          <CardHeader title="Games" subtitle="Every FBS game: model score, then the moneyline, spread and over/under the model likes, each rated out of 10. Green picks are proven. Featured = ranked matchups."
-            action={<Segmented size="sm" label="Show" value={show} onChange={setShow} options={[{ value: "featured", label: "Featured" }, { value: "all", label: "All" }]} />} />
-          <div className="border-b border-line p-3"><Input value={find} onChange={(e) => setFind(e.target.value)} placeholder="Find a team" aria-label="Find a team" /></div>
+          <CardHeader title="Featured games" subtitle="Ranked matchups: model score, then the simulation's spread, total and moneyline picks, each rated out of 10. Green picks are proven."
+            action={<Link to="/cfb/games" className="text-sm text-accent hover:underline">All {w.games.length} games</Link>} />
           {[...byDay.entries()].map(([day, gs]) => (
             <div key={day}>
               <div className="label bg-raised/50 px-4 py-1.5">{day}</div>
-              <div className="divide-y divide-line/60">{gs.map((g) => <GameLine key={g.game_id} g={g} />)}</div>
+              <div className="divide-y divide-line/60">{gs.map((g) => <MatchupRow key={g.game_id} g={g} />)}</div>
             </div>
           ))}
-          {!games.length && <CardBody className="text-sm text-muted">{show === "featured" ? "No featured games this week. Switch to All." : "No games match."}</CardBody>}
+          {!games.length && <CardBody className="text-sm text-muted">No featured games this week. <Link to="/cfb/games" className="text-accent hover:underline">See every game</Link>.</CardBody>}
         </Card>
       )}
       {status.data && (
@@ -79,37 +75,6 @@ export default function CfbHome() {
         </CardBody></Card>
       )}
     </div>
-  );
-}
-
-const CELLS: { market: "moneyline" | "spread" | "total"; label: string }[] = [
-  { market: "moneyline", label: "Moneyline" }, { market: "spread", label: "Spread" }, { market: "total", label: "Over/under" }];
-
-/** One matchup: the two teams and model score, then moneyline, spread and over/under, each with its rating out of 10. */
-function GameLine({ g }: { g: CfbGame }) {
-  return (
-    <Link to={`/cfb/game/${g.game_id}`} className="grid gap-x-4 gap-y-2 px-4 py-3 text-sm hover:bg-raised/50 md:grid-cols-[minmax(0,1.3fr)_repeat(3,minmax(0,1fr))] md:items-center">
-      <div className="min-w-0">
-        <div className="font-medium">{ranked(g.away, g.away_rank)} <span className="tabular-nums text-muted">{g.model.away.toFixed(0)}</span></div>
-        <div className="font-medium">{g.neutral ? "vs " : "at "}{ranked(g.home, g.home_rank)} <span className="tabular-nums text-muted">{g.model.home.toFixed(0)}</span></div>
-        <div className="text-xs text-muted">{kick(g.date)}{g.tv ? ` · ${g.tv}` : ""} · model score</div>
-      </div>
-      <div className="divide-y divide-line/40 rounded-md bg-raised/40 md:contents">
-        {CELLS.map(({ market, label }) => {
-          const m = g.markets.find((x) => x.market === market);
-          return (
-            <div key={market} className="flex min-w-0 items-center justify-between gap-2 px-2.5 py-1.5 md:block md:p-0">
-              <div className="min-w-0">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-muted">{label}</div>
-                {m ? <div className={cn("truncate font-semibold", m.proven && "text-ok")}>{market === "moneyline" ? `${m.team} ${fmtPrice(m.price)}` : market === "spread" ? `${m.team} ${fmtLine(m.line!)}` : `${m.side === "over" ? "Over" : "Under"} ${m.line}`}</div>
-                  : <div className="text-xs text-muted">no line yet</div>}
-              </div>
-              {m && <RatingMeter size="sm" score={m.score} p={m.p} fair={m.fair_p} ev={m.ev} proven={m.proven} />}
-            </div>
-          );
-        })}
-      </div>
-    </Link>
   );
 }
 

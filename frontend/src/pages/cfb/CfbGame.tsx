@@ -1,7 +1,7 @@
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { num, pct } from "@/lib/format";
-import { MARKET_LABEL, bookName, fmtLine, fmtPrice, kick, ranked, useCfb, type Backtest, type Props, type Week } from "@/lib/cfb";
+import { MARKET_LABEL, bookName, fmtLine, fmtPrice, kick, pulled, ranked, useCfb, type Backtest, type Props, type Week } from "@/lib/cfb";
 import { PageTitle } from "@/components/Layout";
 import { Card, CardBody, CardHeader, LoadingBlock, Notice, Stat } from "@/components/ui";
 import { LeanRow, NotPublished, RatingMeter } from "./shared";
@@ -56,6 +56,31 @@ export default function CfbGame() {
         </Card>
       )}
 
+      {!!g.books?.length && (
+        <Card>
+          <CardHeader title="Sportsbook lines" subtitle={`Every book's line and price from the last sportsbook pull (${pulled(g.line.books_at)}). The best price for each side is bold.`} />
+          <CardBody className="overflow-x-auto">
+            <table className="w-full min-w-[520px] text-sm">
+              <thead><tr className="text-xs text-muted"><th className="text-left font-medium">Book</th>
+                <th className="text-right font-medium">{g.away} spread</th><th className="text-right font-medium">{g.home} spread</th>
+                <th className="text-right font-medium">Over</th><th className="text-right font-medium">Under</th>
+                <th className="text-right font-medium">{g.away} ML</th><th className="text-right font-medium">{g.home} ML</th></tr></thead>
+              <tbody>{g.books.map((b) => (
+                <tr key={b.book} className="border-t border-line/60">
+                  <td className="py-1.5 pr-2 font-medium">{bookName(b.book)}</td>
+                  <BookCell v={b.spread?.away} all={g.books!.map((x) => x.spread?.away)} spread />
+                  <BookCell v={b.spread?.home} all={g.books!.map((x) => x.spread?.home)} spread />
+                  <BookCell v={b.total?.over} all={g.books!.map((x) => x.total?.over)} />
+                  <BookCell v={b.total?.under} all={g.books!.map((x) => x.total?.under)} />
+                  <BookCell v={b.ml?.away} all={g.books!.map((x) => x.ml?.away)} />
+                  <BookCell v={b.ml?.home} all={g.books!.map((x) => x.ml?.home)} />
+                </tr>
+              ))}</tbody>
+            </table>
+          </CardBody>
+        </Card>
+      )}
+
       <Card>
         <CardHeader title="Team ratings" subtitle="What each team is expected to do in this game: opponent-adjusted, refit before every week, the last two seasons count most. EPA and success rate leave out garbage time." />
         <CardBody className="overflow-x-auto">
@@ -98,4 +123,13 @@ export default function CfbGame() {
       )}
     </div>
   );
+}
+
+/** One book's [point, price]; bold when it is the best price at that point among the books. */
+function BookCell({ v, all, spread = false }: { v?: [number | null, number]; all: ([number | null, number] | undefined)[]; spread?: boolean }) {
+  if (!v) return <td className="text-right text-muted">–</td>;
+  const pay = (p: number) => (p > 0 ? p / 100 : 100 / -p);
+  const best = all.every((x) => !x || x[0] !== v[0] || pay(x[1]) <= pay(v[1]));
+  const pt = v[0] == null ? "" : spread ? fmtLine(v[0]) : String(v[0]);
+  return <td className={`text-right tabular-nums ${best ? "font-semibold" : "text-muted"}`}>{pt} <span className="text-xs">{fmtPrice(v[1])}</span></td>;
 }

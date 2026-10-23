@@ -48,6 +48,7 @@ const NBA_MOBILE = [NBA_NAV[0], NBA_NAV[3], NBA_NAV[1], NBA_NAV[2]];
 const CFB_SECTIONS: { title: string; items: NavItem[] }[] = [
   { title: "Picks", items: [
     { to: "/cfb", label: "This week", short: "Home", icon: LayoutDashboard, end: true },
+    { to: "/cfb/games", label: "All games", short: "Games", icon: ListOrdered },
     { to: "/cfb/ask", label: "Ask", icon: MessageCircleQuestion },
     { to: "/cfb/parlay", label: "Parlay builder", short: "Parlay", icon: Layers },
   ] },
@@ -59,7 +60,7 @@ const CFB_SECTIONS: { title: string; items: NavItem[] }[] = [
   { title: "", items: [{ to: "/settings", label: "Settings", icon: Settings }] },
 ];
 const CFB_NAV = CFB_SECTIONS.flatMap((s) => s.items);
-const CFB_MOBILE = [CFB_NAV[0], CFB_NAV[2], CFB_NAV[4], CFB_NAV[5]];
+const CFB_MOBILE = [CFB_NAV[0], CFB_NAV[1], CFB_NAV[3], CFB_NAV[6]];
 
 type Sport = "nfl" | "nba" | "cfb";
 const sportOf = (path: string): Sport => (path === "/nba" || path.startsWith("/nba/") ? "nba" : path === "/cfb" || path.startsWith("/cfb/") ? "cfb" : "nfl");

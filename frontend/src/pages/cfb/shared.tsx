@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { cn, pct } from "@/lib/format";
-import { MARKET_LABEL, bookName, fmtPrice, pickText, ranked, tierOf, type Backtest, type CfbGame, type Lean } from "@/lib/cfb";
+import { MARKET_LABEL, bookName, fmtLine, fmtPrice, kick, pickText, ranked, tierOf, type Backtest, type CfbGame, type Lean } from "@/lib/cfb";
 import { Badge, Card, EmptyState } from "@/components/ui";
 import { TierBadge } from "@/components/shared";
 
@@ -79,5 +79,50 @@ export function RatingMeter({ score, p, fair, ev, proven, size = "md" }: { score
       </div>
       <span className="text-sm tabular-nums"><b className={size === "sm" ? "" : "text-base"}>{score.toFixed(1)}</b><span className="text-muted">/10</span></span>
     </div>
+  );
+}
+
+export const MATCHUP_CELLS: { market: "spread" | "total" | "moneyline"; label: string }[] = [
+  { market: "spread", label: "Spread" }, { market: "total", label: "Total points" }, { market: "moneyline", label: "Moneyline" }];
+
+/** What the 5,000 simulations say for a market, in one short line. */
+function simLine(g: CfbGame, market: "spread" | "total" | "moneyline"): string {
+  const m = g.model;
+  if (market === "spread") return m.margin >= 0 ? `sims: ${g.home} by ${m.margin.toFixed(1)}` : `sims: ${g.away} by ${(-m.margin).toFixed(1)}`;
+  if (market === "total") return `sims: ${m.total.toFixed(1)} points`;
+  return `sims: ${m.home_win >= 0.5 ? g.home : g.away} wins ${pct(Math.max(m.home_win, 1 - m.home_win), 0)}`;
+}
+
+/** One matchup: the two teams and model score, then the sim's spread, total and moneyline picks, each rated out of 10. */
+export function MatchupRow({ g }: { g: CfbGame }) {
+  return (
+    <Link to={`/cfb/game/${g.game_id}`} className="grid grid-cols-[minmax(0,1fr)] gap-x-4 gap-y-2 px-4 py-3 text-sm hover:bg-raised/50 md:grid-cols-[minmax(0,1.2fr)_repeat(3,minmax(0,1fr))] md:items-center">
+      <div className="min-w-0">
+        <div className="font-medium">{ranked(g.away, g.away_rank)} <span className="tabular-nums text-muted">{g.model.away.toFixed(0)}</span></div>
+        <div className="font-medium">{g.neutral ? "vs " : "at "}{ranked(g.home, g.home_rank)} <span className="tabular-nums text-muted">{g.model.home.toFixed(0)}</span></div>
+        <div className="text-xs text-muted">{kick(g.date)}{g.tv ? ` · ${g.tv}` : ""} · model score{g.featured ? " · " : ""}{g.featured && <span className="text-accent">featured</span>}</div>
+      </div>
+      <div className="divide-y divide-line/40 rounded-md bg-raised/40 md:contents">
+        {MATCHUP_CELLS.map(({ market, label }) => {
+          const m = g.markets.find((x) => x.market === market);
+          return (
+            <div key={market} className="flex min-w-0 items-center justify-between gap-2 px-2.5 py-1.5 md:block md:border-0 md:p-0">
+              <div className="min-w-0 flex-1">
+                <div className="text-[10px] font-medium uppercase tracking-wider text-muted">{label}</div>
+                {m ? (
+                  <>
+                    <div className={cn("truncate font-semibold", m.proven && "text-ok")}>
+                      {market === "moneyline" ? `${m.team} ${fmtPrice(m.price)}` : market === "spread" ? `${m.team} ${fmtLine(m.line!)}` : `${m.side === "over" ? "Over" : "Under"} ${m.line}`}
+                    </div>
+                    <div className="truncate text-[11px] text-muted">{simLine(g, market)}{m.best?.book ? ` · ${fmtPrice(m.best.price)} ${bookName(m.best.book)}` : ""}</div>
+                  </>
+                ) : <div className="text-xs text-muted">no line yet</div>}
+              </div>
+              {m && <div className="shrink-0 md:mt-1"><RatingMeter size="sm" score={m.score} p={m.p} fair={m.fair_p} ev={m.ev} proven={m.proven} /></div>}
+            </div>
+          );
+        })}
+      </div>
+    </Link>
   );
 }

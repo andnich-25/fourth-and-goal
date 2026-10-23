@@ -169,3 +169,13 @@ def test_rating_ranks_bigger_kept_edges_higher_and_caps_unproven():
     m = {"market": "total", "p": 0.59, "proven": False}
     assert pipeline.score_lean(m, r)["score"] <= pipeline.UNPROVEN_CAP
     assert not rating.walk_forward(L).empty
+
+
+def test_book_table_groups_each_books_lines():
+    offers = [{"game_id": 1, "book": "fanduel", "market": "spreads", "side": "home", "point": -3.5, "price": -112},
+              {"game_id": 1, "book": "fanduel", "market": "h2h", "side": "away", "point": None, "price": 150},
+              {"game_id": 1, "book": "draftkings", "market": "totals", "side": "over", "point": 55.5, "price": -110}]
+    t = pipeline.book_table(offers)
+    assert [b["book"] for b in t] == ["draftkings", "fanduel"]
+    assert t[1]["spread"]["home"] == [-3.5, -112] and t[1]["ml"]["away"] == [None, 150] and t[0]["total"]["over"] == [55.5, -110]
+    assert pipeline._hours("2026-10-20T15:00:00Z", "2026-10-22T15:00:00+00:00") == 48
