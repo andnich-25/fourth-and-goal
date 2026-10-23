@@ -19,7 +19,7 @@ export function Matchup({ g, className }: { g: Pick<CfbGame, "home" | "away" | "
 }
 
 /** One lean: the bet, its score out of 10, the backtest tier and whether that tier is proven. */
-export function LeanRow({ m, bt, to, sub, className }: { m: Lean; bt?: Backtest; to?: string; sub?: React.ReactNode; className?: string }) {
+export function LeanRow({ m, bt, to, sub, className, simple = false }: { m: Lean; bt?: Backtest; to?: string; sub?: React.ReactNode; className?: string; simple?: boolean }) {
   const tier = tierOf(bt?.markets[m.market], m.tier);
   const body = (
     <>
@@ -27,17 +27,19 @@ export function LeanRow({ m, bt, to, sub, className }: { m: Lean; bt?: Backtest;
         <div className="font-semibold">{pickText(m)}</div>
         <div className="text-xs text-muted">
           {MARKET_LABEL[m.market]}{m.market === "team_total" && !m.line_posted ? " (implied line)" : ""}
-          {m.best?.book ? ` · best ${fmtPrice(m.best.price)} at ${bookName(m.best.book)}` : ""}
-          {m.market === "moneyline" && m.ev != null ? ` · ${m.ev >= 0 ? "+" : ""}${(m.ev * 100).toFixed(1)}¢ per $1` : ""}
+          {!simple && m.best?.book ? ` · best ${fmtPrice(m.best.price)} at ${bookName(m.best.book)}` : ""}
+          {!simple && m.market === "moneyline" && m.ev != null ? ` · ${m.ev >= 0 ? "+" : ""}${(m.ev * 100).toFixed(1)}¢ per $1` : ""}
           {sub ? <> · {sub}</> : null}
         </div>
       </div>
       <div className="text-right">
         <RatingMeter score={m.score} p={m.p} fair={m.fair_p} ev={m.ev} proven={m.proven} />
-        <div className="mt-1 flex items-center justify-end gap-1">
-          {m.proven ? <Badge tone="ok" title="This tier beat the -110 break-even (52.4%) on games the model never saw">Proven</Badge> : null}
-          <TierBadge tier={tier} compact />
-        </div>
+        {!simple && (
+          <div className="mt-1 flex items-center justify-end gap-1">
+            {m.proven ? <Badge tone="ok" title="This tier beat the -110 break-even (52.4%) on games the model never saw">Proven</Badge> : null}
+            <TierBadge tier={tier} compact />
+          </div>
+        )}
       </div>
     </>
   );
@@ -83,46 +85,64 @@ export function RatingMeter({ score, p, fair, ev, proven, size = "md" }: { score
 }
 
 export const MATCHUP_CELLS: { market: "spread" | "total" | "moneyline"; label: string }[] = [
-  { market: "spread", label: "Spread" }, { market: "total", label: "Total points" }, { market: "moneyline", label: "Moneyline" }];
+  { market: "spread", label: "Spread" }, { market: "total", label: "Over/under" }, { market: "moneyline", label: "Moneyline" }];
 
 /** What the 5,000 simulations say for a market, in one short line. */
-function simLine(g: CfbGame, market: "spread" | "total" | "moneyline"): string {
-  const m = g.model;
-  if (market === "spread") return m.margin >= 0 ? `sims: ${g.home} by ${m.margin.toFixed(1)}` : `sims: ${g.away} by ${(-m.margin).toFixed(1)}`;
-  if (market === "total") return `sims: ${m.total.toFixed(1)} points`;
-  return `sims: ${m.home_win >= 0.5 ? g.home : g.away} wins ${pct(Math.max(m.home_win, 1 - m.home_win), 0)}`;
+function simLine(g: CfbGame, market: "spread" | "total" | "moneyline", m?: Lean): string {
+  const s = g.model;
+  if (market === "spread") return s.margin >= 0 ? `Sims: ${g.home} by ${s.margin.toFixed(1)}` : `Sims: ${g.away} by ${(-s.margin).toFixed(1)}`;
+  if (market === "total") return `Sims: ${s.total.toFixed(1)} total points`;
+  const p = m ? (m.side === "home" ? s.home_win : 1 - s.home_win) : Math.max(s.home_win, 1 - s.home_win);
+  return `Sims: ${m?.team ?? (s.home_win >= 0.5 ? g.home : g.away)} wins ${pct(p, 0)}`;
 }
 
-/** One matchup: the two teams and model score, then the sim's spread, total and moneyline picks, each rated out of 10. */
+/** One matchup: the teams and the simulated score on top, then three boxes (spread, total, moneyline), each with the
+ *  simulation's pick and its rating out of 10. Prices and the details live on the game page. */
 export function MatchupRow({ g }: { g: CfbGame }) {
+  const fav = g.model.margin >= 0 ? g.home : g.away;
   return (
-    <Link to={`/cfb/game/${g.game_id}`} className="grid grid-cols-[minmax(0,1fr)] gap-x-4 gap-y-2 px-4 py-3 text-sm hover:bg-raised/50 md:grid-cols-[minmax(0,1.2fr)_repeat(3,minmax(0,1fr))] md:items-center">
-      <div className="min-w-0">
-        <div className="font-medium">{ranked(g.away, g.away_rank)} <span className="tabular-nums text-muted">{g.model.away.toFixed(0)}</span></div>
-        <div className="font-medium">{g.neutral ? "vs " : "at "}{ranked(g.home, g.home_rank)} <span className="tabular-nums text-muted">{g.model.home.toFixed(0)}</span></div>
-        <div className="text-xs text-muted">{kick(g.date)}{g.tv ? ` · ${g.tv}` : ""} · model score{g.featured ? " · " : ""}{g.featured && <span className="text-accent">featured</span>}</div>
+    <Link to={`/cfb/game/${g.game_id}`} className="block space-y-2.5 px-4 py-3.5 text-sm hover:bg-raised/40">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+        <div className="font-semibold"><Matchup g={g} /></div>
+        <div className="text-xs text-muted">{kick(g.date)}{g.tv ? ` · ${g.tv}` : ""}</div>
       </div>
-      <div className="divide-y divide-line/40 rounded-md bg-raised/40 md:contents">
+      <div className="text-xs text-muted">
+        Simulated score: <span className="text-fg">{g.away} {g.model.away.toFixed(0)}, {g.home} {g.model.home.toFixed(0)}</span>
+        {" "}· {fav} wins {pct(Math.max(g.model.home_win, 1 - g.model.home_win), 0)} of sims
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         {MATCHUP_CELLS.map(({ market, label }) => {
           const m = g.markets.find((x) => x.market === market);
           return (
-            <div key={market} className="flex min-w-0 items-center justify-between gap-2 px-2.5 py-1.5 md:block md:border-0 md:p-0">
-              <div className="min-w-0 flex-1">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-muted">{label}</div>
-                {m ? (
-                  <>
-                    <div className={cn("truncate font-semibold", m.proven && "text-ok")}>
-                      {market === "moneyline" ? `${m.team} ${fmtPrice(m.price)}` : market === "spread" ? `${m.team} ${fmtLine(m.line!)}` : `${m.side === "over" ? "Over" : "Under"} ${m.line}`}
-                    </div>
-                    <div className="truncate text-[11px] text-muted">{simLine(g, market)}{m.best?.book ? ` · ${fmtPrice(m.best.price)} ${bookName(m.best.book)}` : ""}</div>
-                  </>
-                ) : <div className="text-xs text-muted">no line yet</div>}
+            <div key={market}
+              className={cn("flex items-center justify-between gap-2 rounded-lg border px-3 py-2 sm:block", m && m.score >= 7 ? "border-ok/60 bg-ok/5" : "border-line bg-raised/30")}>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">{label}
+                  {m && m.score >= 7 && <span className="rounded bg-ok/15 px-1 text-[10px] text-ok">Pick</span>}</div>
+                <div className="truncate text-[15px] font-semibold">
+                  {!m ? <span className="text-sm font-normal text-muted">No line yet</span>
+                    : market === "moneyline" ? `${m.team} ${fmtPrice(m.price)}` : market === "spread" ? `${m.team} ${fmtLine(m.line!)}` : `${m.side === "over" ? "Over" : "Under"} ${m.line}`}
+                </div>
+                {m && <div className="text-xs text-muted sm:truncate">{simLine(g, market, m)}</div>}
               </div>
-              {m && <div className="shrink-0 md:mt-1"><RatingMeter size="sm" score={m.score} p={m.p} fair={m.fair_p} ev={m.ev} proven={m.proven} /></div>}
+              {m && <div className="shrink-0 sm:mt-1.5"><RatingMeter size="sm" score={m.score} p={m.p} fair={m.fair_p} ev={m.ev} proven={m.proven} /></div>}
             </div>
           );
         })}
       </div>
     </Link>
+  );
+}
+
+/** The one-line key to the ratings, shown above lists of picks. */
+export function RatingKey({ className }: { className?: string }) {
+  const chip = (tone: string) => <span className={cn("inline-block h-2.5 w-2.5 rounded-[2px]", tone)} />;
+  return (
+    <div className={cn("flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted", className)}>
+      <span className="font-medium text-fg">Rating out of 10</span>
+      <span className="inline-flex items-center gap-1.5">{chip("bg-ok")} 7+ pick: beat the books in testing</span>
+      <span className="inline-flex items-center gap-1.5">{chip("bg-warn")} 5 to 7: lean</span>
+      <span className="inline-flex items-center gap-1.5">{chip("bg-muted/50")} under 5: pass</span>
+    </div>
   );
 }
