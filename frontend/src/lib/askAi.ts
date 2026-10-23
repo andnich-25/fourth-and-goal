@@ -1,13 +1,12 @@
 /* Optional AI mode for the Ask page. The visitor's own Anthropic API key stays in this browser (localStorage) and is
    sent only to api.anthropic.com. Claude answers only through tools that run the site's own answer functions, so
    every number it quotes comes from the published data. */
-import Anthropic from "@anthropic-ai/sdk";
 import { betaTool } from "@anthropic-ai/sdk/helpers/beta/json-schema.mjs";
 import {
-  answerAny, answerDefense, answerDue, answerGames, answerGlossary, answerHitRates, answerLadder, answerLeaders, answerWhy, answerGame, answerInjuries, answerJson, answerParlay, answerPerGame, answerPlayer, answerPlayerLine, answerPriceCheck, answerProps, answerRecord, answerSleepers, answerTop,
+  answerMatchup, answerWhyPicks, answerAny, answerDefense, answerDue, answerGames, answerGlossary, answerHitRates, answerLadder, answerLeaders, answerWhy, answerGame, answerInjuries, answerJson, answerParlay, answerPerGame, answerPlayer, answerPlayerLine, answerPriceCheck, answerProps, answerRecord, answerSleepers, answerTop,
   answerUnders, answerValue, gameLabel, parse, type AskData, type Filters,
 } from "@/lib/ask";
-import { MODEL } from "@/lib/aiKey";
+import { WRITEUP_RULES, runAi, type AiTurn } from "@/lib/aiRunner";
 
 
 const DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -80,6 +79,16 @@ function tools(d: AskData) {
         return ids.length ? out(answerJson(answerWhy(d, ids, i.market, i.side)))
           : out({ error: "No player with that name has chances this week." });
       },
+    }),
+    betaTool({
+      name: "game_matchup", description: "Why one team is favored and how a game sets up: the betting line's implied points for each team (the site does not model NFL spreads), each defense's points, TDs and expected TDs allowed, red-zone TD rate, TDs allowed by position vs league, scheme rates (blitz, pressure, man/zone, box counts, top coverage shell) vs league, the injury report, the most likely TD scorers and strongest prop sides. Use for 'why is X favored', 'who wins', 'break down X vs Y', 'preview'.",
+      inputSchema: { type: "object", properties: { teams: TEAMS }, required: ["teams"], additionalProperties: false } as const,
+      run: async (i) => out(answerJson(answerMatchup(d, i.teams.map((t) => t.toUpperCase())))),
+    }),
+    betaTool({
+      name: "explain_top_picks", description: "The strongest proven picks this week across every market, each with the factors for it, the factors against it, its key numbers and its tier's record on unseen weeks. Use for 'why these picks', 'explain your best bets', 'how confident are you in your picks'.",
+      inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 5 }, exclude_td: { type: "boolean" }, position: POSITION, teams: TEAMS, day: DAY }, required: ["limit"], additionalProperties: false } as const,
+      run: async (i) => out(answerJson(answerWhyPicks(d, i.limit, filters(i), i.exclude_td))),
     }),
     betaTool({
       name: "hit_rates", description: "Player props where he cleared the line in at least `threshold` of his last `window` games (e.g. 1.0 = 100%), at the highest line that holds (lowest for unders), with this week's model chance beside each. Use for hit-rate, 'every game', streak and 'hasn't missed' questions.",
@@ -174,30 +183,15 @@ Rules:
 - Suggested picks and parlays come only from confidence tiers that hit 50%+ on unseen weeks; the tools already apply that, so do not pad a list or parlay with weaker legs. If a tool returns fewer legs than asked, say why.
 - Prop chances already blend a 5,000-run simulation of each game where it proved more accurate. Mention it when asked how picks are made (explain_term "how picks are made").
 - When the visitor names a price ("at -160", "+250", a slip), call price_check for each player and say plainly whether it is value, fair or overpriced. When they name an exact line for a player, call player_line.
-- For "why" questions, call explain_pick and answer in plain words from its numbers: what supports the lean, what works against it, and how confident the model is. Do not invent factors the tool did not return.
+- For "why" questions about a player, call explain_pick (and price_check when a price is named); about a team or game, call game_matchup; about the site's picks as a group, call explain_top_picks. Answer from their numbers: what supports the lean, what works against it, the price, the tier's record and how confident the model is. Do not invent factors the tools did not return.
 - You can answer a wide range of questions: picks by market, position, team, game or day; parlays; value vs the books; unders; hit rates and streaks; a player's alt-line ladder; defenses and matchups; game totals; projection leaders; due players; injuries; the model's record; and what the site's terms mean. Combine tools for multi-part questions (for example game_totals then best_per_game).
 - Call several tools when the question needs it (for example list_games, then best_per_game). Pass filters (position, teams, day) when the question names them.
-- Keep the answer short and scannable: a one-line lead, then a list of picks (player, team, bet, our chance, best price if any), then at most two short caveats. No guarantees; book prices are sharp and no bet is a sure thing.`;
+- For list questions, keep the answer short and scannable: a one-line lead, then a list of picks (player, team, bet, our chance, best price if any), then at most two short caveats. No guarantees; book prices are sharp and no bet is a sure thing.
 
-export type AiTurn = { role: "user" | "assistant"; text: string };
+${WRITEUP_RULES}`;
+
+export type { AiTurn };
 
 export async function askAi(key: string, d: AskData, question: string, history: AiTurn[], onStatus?: (s: string) => void): Promise<string> {
-  const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
-  const runner = client.beta.messages.toolRunner({
-    model: MODEL,
-    max_tokens: 16000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    system: `${SYSTEM}\n\nThis is ${d.season} week ${d.week}.`,
-    tools: tools(d),
-    messages: [...history.map((t) => ({ role: t.role, content: t.text })), { role: "user", content: question }],
-    max_iterations: 8,
-  });
-  for await (const msg of runner) {
-    const used = msg.content.filter((b) => b.type === "tool_use").map((b) => (b as { name: string }).name);
-    if (used.length) onStatus?.(`Checking ${used.join(", ").replace(/_/g, " ")}…`);
-  }
-  const final = await runner.done();
-  if (final.stop_reason === "refusal") return "The AI declined to answer that one. Try the built-in answer instead.";
-  return final.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
+  return runAi(key, `${SYSTEM}\n\nThis is ${d.season} week ${d.week}.`, tools(d), question, history, onStatus);
 }

@@ -35,6 +35,11 @@ const slate: Slate = {
 };
 
 describe("nba ask", () => {
+  it.skipIf(!process.env.PEEK)("peek", () => {
+    const a = answer(process.env.PEEK as string, slate);
+    console.log([a.title, a.text, ...(a.sections ?? []).map((s) => `## ${s.title}\n${s.lines.map((l) => `- ${l}`).join("\n")}`), ...(a.bullets ?? [])].join("\n"));
+  });
+
   it("answers a player threshold question from the distribution", () => {
     const a = answer("Will Brunson score 25 points?", slate);
     expect(a.items).toHaveLength(1);
@@ -65,7 +70,7 @@ describe("nba ask", () => {
   it("explains the side that was asked about and skips lines under 1.5", () => {
     const why = answer("why is tatum under", slate);
     expect(why.items[0].side).toBe("under");
-    expect(why.bullets?.length).toBeGreaterThan(1);
+    expect(why.sections?.map((x) => x.title)).toEqual(["The pick", "Why the model leans under", "His recent games", "Working against it"]);
     expect(answer("brunson props", slate).items.some((x) => x.row.market === "threes")).toBe(false);
     expect(answer("brunson last 3 games", slate).title).toBe("Jalen Brunson: last 3 games");
   });
@@ -76,5 +81,28 @@ describe("nba ask", () => {
       expect(a.title.length, q).toBeGreaterThan(0);
       expect(a.items.length + (a.bullets?.length ?? 0) + (a.text ? 1 : 0), q).toBeGreaterThan(0);
     }
+  });
+  it("explains why a team is favored from the line, projections, injuries and pace", () => {
+    const a = answer("Why are the Knicks favored?", slate);
+    const titles = a.sections!.map((x) => x.title);
+    expect(titles).toEqual(["The line", "What our projections add up to", "Why NY is favored", "Best props in this game"]);
+    const text = a.sections!.flatMap((x) => x.lines).join("\n");
+    expect(text).toMatch(/NY a 3\.5-point favorite with a total of 221\.5/);
+    expect(text).toMatch(/does not bet NBA sides/);
+    expect(text).toMatch(/NY is without Hurt Guy/);
+    expect(answer("Celtics vs Knicks preview", slate).sections?.length).toBeGreaterThan(2);
+  });
+
+  it("explains the strongest leans", () => {
+    const a = answer("Why are these your best picks?", slate);
+    expect(a.sections!.length).toBe(3);
+    const one = answer("explain your best bet tonight", slate);
+    expect(one.sections![0].title).toBe("The pick");
+  });
+
+  it.each(["why are the knicks favored", "who wins celtics knicks", "celtics vs knicks breakdown", "Knicks Celtics prediction", "why is boston the underdog",
+    "why tatum under", "explain brunson assists", "break down brunson", "how confident are you in brunson", "what's your take on Jaylen Brown",
+    "why are these your best picks", "explain your top 2 leans", "why do you like your best bet"])("%s gets a write-up", (q) => {
+    expect(answer(q, slate).sections?.length).toBeGreaterThan(0);
   });
 });

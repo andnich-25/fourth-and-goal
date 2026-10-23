@@ -1,13 +1,13 @@
 import * as React from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { ArrowUp, Bot, KeyRound, Loader2, MessageCircleQuestion, Trash2 } from "lucide-react";
+import { ArrowUp, Loader2, MessageCircleQuestion, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn, num, pct } from "@/lib/format";
 import { useConfidence } from "@/lib/confidence";
 import { useFeed } from "@/lib/feed";
 import { answer, EXAMPLES, fmtPrice, slipLeg, gameLabel, american, type Answer, type AskData, type Pick, type PropRow } from "@/lib/ask";
-import { loadKey, MODEL, saveKey } from "@/lib/aiKey";
+import { AiKeyLink, AiText, AiToggle, KeyPanel, useAiMode } from "@/components/AiAsk";
 import type { AiTurn } from "@/lib/askAi";
 import type { Buckets } from "@/lib/sim";
 import { useLinkSuffix, useSeasonWeek } from "@/lib/state";
@@ -16,6 +16,8 @@ import { PageTitle } from "@/components/Layout";
 import { SignalIcons, TierBadge } from "@/components/shared";
 import { dueRecord, useDueStudy } from "@/lib/signals";
 import { Badge, Button, Card, CardBody, CardHeader, Input, LoadingBlock, Notice, PosBadge, TeamBadge } from "@/components/ui";
+import { WriteUp } from "@/components/WriteUp";
+import type { AskDefenses } from "@/lib/ask";
 
 const SLIP_KEY = "fg-parlay-slip-v1";
 
@@ -26,6 +28,7 @@ export function useAskData(season: number, week: number): { data: AskData | null
   const validated = (markets.data?.markets ?? []).filter((m) => m.validated);
   const props = useQueries({ queries: validated.map((m) => ({ queryKey: ["props", season, week, m.market], queryFn: () => api.get<{ rows: PropRow[] }>("/props", { season, week, market: m.market }) })) });
   const model = useQuery({ queryKey: ["parlay-model"], queryFn: () => api.get<{ use_correlation: boolean; buckets: Buckets }>("/parlay/model") });
+  const defenses = useQuery({ queryKey: ["defenses", season, week, 0], queryFn: () => api.get<AskDefenses>("/defenses", { season, week }) });
   const feed = useFeed(season, week);
   const conf = useConfidence();
   const due = useDueStudy();
@@ -36,9 +39,9 @@ export function useAskData(season: number, week: number): { data: AskData | null
     const pm: AskData["props"] = {};
     validated.forEach((m, i) => { const rows = props[i]?.data?.rows; if (rows) pm[m.market] = { label: m.label, rows }; });
     return { season, week, td: ranks.data.calibrated ? ranks.data.rows : [], props: pm, feed, conf: conf.data,
-      buckets: model.data?.buckets ?? {}, useCorr: !!model.data?.use_correlation, dueRecord: dueRecord(due.data) };
+      buckets: model.data?.buckets ?? {}, useCorr: !!model.data?.use_correlation, dueRecord: dueRecord(due.data), defenses: defenses.data ?? null };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ranks.data, propsKey, feed, conf.data, model.data, due.data, season, week, loading]);
+  }, [ranks.data, propsKey, feed, conf.data, model.data, due.data, defenses.data, season, week, loading]);
   return { data, loading };
 }
 
@@ -50,9 +53,8 @@ export default function AskPage() {
   const [sp, setSp] = useSearchParams();
   const [q, setQ] = React.useState("");
   const [turns, setTurns] = React.useState<Turn[]>([]);
-  const [key, setKey] = React.useState(loadKey);
-  const [useAi, setUseAi] = React.useState(() => !!loadKey());
-  const [showKey, setShowKey] = React.useState(false);
+  const ai = useAiMode();
+  const { key } = ai;
   const endRef = React.useRef<HTMLDivElement>(null);
   const nextId = React.useRef(1);
 
@@ -61,10 +63,10 @@ export default function AskPage() {
     if (!text || !data) return;
     setQ("");
     const id = nextId.current++;
-    const ai = useAi && !!key;
-    setTurns((t) => [...t, { id, q: text, mode: ai ? "ai" : "built-in", a: ai ? undefined : answer(data, text), status: ai ? "Thinking…" : undefined }]);
+    const on = ai.on;
+    setTurns((t) => [...t, { id, q: text, mode: on ? "ai" : "built-in", a: on ? undefined : answer(data, text), status: on ? "Thinking…" : undefined }]);
     setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }), 50);
-    if (!ai) return;
+    if (!on) return;
     const history: AiTurn[] = turns.filter((t) => t.mode === "ai" && t.text).slice(-4).flatMap((t) => [{ role: "user" as const, text: t.q }, { role: "assistant" as const, text: t.text as string }]);
     try {
       const { askAi } = await import("@/lib/askAi"); // the SDK loads only when AI mode is used
@@ -74,7 +76,7 @@ export default function AskPage() {
       const msg = e instanceof Error ? e.message : String(e);
       setTurns((all) => all.map((t) => (t.id === id ? { ...t, status: undefined, error: /401|auth|api.key/i.test(msg) ? "The API key was not accepted. Check it under AI answers." : msg, a: answer(data, text) } : t)));
     }
-  }, [data, useAi, key, turns]);
+  }, [data, ai.on, key, turns]);
 
   // Questions sent from the home page arrive as ?q=
   const incoming = sp.get("q");
@@ -97,7 +99,7 @@ export default function AskPage() {
             <div className="flex items-start gap-3">
               <MessageCircleQuestion className="mt-0.5 h-5 w-5 shrink-0 text-accent" aria-hidden />
               <p className="text-sm text-muted">Ask about this week in plain English: touchdown scorers, player props, parlays, value against the books, a team, a game,
-                a player, or how accurate the model is. Add filters like a position (WR), a team (Bears) or a day (Thursday). Answers use only the site's validated chances and real sportsbook prices.</p>
+                a player, or how accurate the model is. Ask "why" about any player, pick or game (for example "Why is Detroit favored?") for a full breakdown. Add filters like a position (WR), a team (Bears) or a day (Thursday). Answers use only the site's validated chances and real sportsbook prices.</p>
             </div>
             <div className="flex flex-wrap gap-2">{EXAMPLES.map((e) => <Chip key={e} onClick={() => void ask(e)} disabled={!data}>{e}</Chip>)}</div>
           </CardBody>
@@ -115,16 +117,13 @@ export default function AskPage() {
       <div className="sticky bottom-16 z-20 -mx-4 bg-bg/90 px-4 pb-3 pt-2 backdrop-blur sm:-mx-6 sm:px-6 lg:bottom-0">
         <form onSubmit={(e) => { e.preventDefault(); void ask(q); }} className="flex items-center gap-2 rounded-xl border border-line bg-surface p-2 shadow-lg">
           <Input aria-label="Your question" placeholder={data ? "Ask anything about this week…" : "Loading this week's data…"} value={q} onChange={(e) => setQ(e.target.value)} className="h-10 flex-1 border-0 bg-transparent text-base focus-visible:ring-0" />
-          <button type="button" onClick={() => (key ? setUseAi((v) => !v) : setShowKey(true))} title={key ? "Switch between AI and built-in answers" : "Turn on AI answers"}
-            className={cn("flex h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium", useAi && key ? "bg-accent/15 text-accent" : "text-muted hover:bg-raised")}>
-            <Bot className="h-4 w-4" aria-hidden />{useAi && key ? "AI" : "Built-in"}
-          </button>
+          <AiToggle ai={ai} />
           <Button type="submit" variant="primary" disabled={!q.trim() || !data} aria-label="Ask"><ArrowUp className="h-4 w-4" /></Button>
         </form>
-        <div className="mt-1 text-right"><button className="text-[11px] text-muted underline" onClick={() => setShowKey((v) => !v)}><KeyRound className="mr-1 inline h-3 w-3" />AI answers</button></div>
+        <div className="mt-1 text-right"><AiKeyLink ai={ai} /></div>
       </div>
 
-      {showKey && <KeyPanel keyValue={key} onSave={(k) => { saveKey(k); setKey(k); setUseAi(!!k); setShowKey(false); }} />}
+      {ai.showKey && <KeyPanel keyValue={key} onSave={ai.save} />}
     </div>
   );
 }
@@ -141,8 +140,8 @@ function TurnView({ t, data, onAsk, season, week }: { t: Turn; data: AskData | n
       {t.error && <Notice tone="warn">{t.error} Showing the built-in answer instead.</Notice>}
       {t.text && (
         <Card><CardBody className="space-y-2">
-          <div className="flex items-center gap-2 text-xs text-muted"><Bot className="h-3.5 w-3.5" />AI answer from the site's numbers</div>
-          <div className="whitespace-pre-wrap text-sm leading-relaxed">{t.text.replace(/\*\*(.+?)\*\*/g, "$1")}</div>
+          <div className="text-xs text-muted">AI answer from the site's numbers</div>
+          <AiText text={t.text} />
         </CardBody></Card>
       )}
       {t.a && <AnswerView a={t.a} data={data} onAsk={onAsk} season={season} week={week} />}
@@ -165,6 +164,7 @@ function AnswerView({ a, data, onAsk, season, week }: { a: Answer; data: AskData
   return (
     <Card>
       <CardHeader title={a.title} subtitle={a.summary} />
+      {a.sections && <WriteUp sections={a.sections} />}
       {a.parlay && (
         <div className="flex flex-wrap gap-6 border-b border-line px-4 py-3 sm:px-5">
           <div><div className="label">All {a.parlay.legs} hit (simulated)</div><div className="font-display text-2xl font-semibold">{pct(a.parlay.joint, 1)}</div></div>
@@ -237,23 +237,5 @@ export function PickList({ picks, suffix }: { picks: Pick[]; suffix: string }) {
         </li>
       ))}
     </ul>
-  );
-}
-
-function KeyPanel({ keyValue, onSave }: { keyValue: string; onSave: (k: string) => void }) {
-  const [v, setV] = React.useState(keyValue);
-  return (
-    <Card>
-      <CardHeader icon={<Bot className="h-4 w-4 text-accent" />} title="AI answers (optional)" subtitle="Lets Claude understand any wording. It can only use the site's numbers, through the same functions as the built-in answers." />
-      <CardBody className="space-y-3 text-sm">
-        <p className="text-muted">Paste an Anthropic API key (from console.anthropic.com). It is saved only in this browser and sent only to Anthropic. Each question
-          costs a few cents on that key (model {MODEL}). Built-in answers stay free and work without a key.</p>
-        <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); onSave(v.trim()); }}>
-          <Input type="password" autoComplete="off" placeholder="sk-ant-…" value={v} onChange={(e) => setV(e.target.value)} className="min-w-0 flex-1 basis-60" aria-label="Anthropic API key" />
-          <Button type="submit" variant="primary">Save</Button>
-          {keyValue && <Button type="button" variant="ghost" onClick={() => onSave("")}>Remove key</Button>}
-        </form>
-      </CardBody>
-    </Card>
   );
 }

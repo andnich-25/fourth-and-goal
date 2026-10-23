@@ -11,13 +11,23 @@ import type { RankingRow } from "@/lib/types";
 import { dueOf, type Due, type DueBin } from "@/lib/signals";
 import { likelyToPlay, starterQbs } from "@/lib/playing";
 import { bookLines, ladder, lineAtRate, playable } from "@/lib/hitrates";
+import { tidy, type Section } from "@/lib/writeup";
 
 export type Recent = { season: number; week: number; opponent: string; value: number };
 export type PropRow = { player_id: string; player_name: string; team: string; opponent: string; position: string; game_id: string; eligible: number;
   median: number; q10: number; q90: number; dist: PropDist | null; recent?: Recent[]; evidence?: Record<string, number | null> };
+/** One defense from /defenses (games before this week only), with its scheme rates when charting is built. */
+export type AskDefense = {
+  defense: string; games: number; available: boolean; positions: Record<string, { tds: number; tds_pg: number; xtd_pg: number }>;
+  points_allowed_pg: number | null; offensive_tds_allowed_pg: number; xtd_allowed_pg: number; rz_td_rate_allowed: number | null; plays_faced_pg: number | null;
+  scheme?: { rates: Record<string, number>; top_shell: [string | null, number | null] | null };
+};
+type Pos = "QB" | "RB" | "WR" | "TE";
+export type AskDefenses = { teams: AskDefense[]; league: Partial<Record<Pos, { tds_pg: number; xtd_pg: number }>> & { rz_td_rate?: number | null };
+  scheme_league?: Record<string, number> | null; coverage?: string };
 export type AskData = {
   season: number; week: number; td: RankingRow[]; props: Record<string, { label: string; rows: PropRow[] }>;
-  feed: Feed; conf?: Confidence; buckets: Buckets; useCorr: boolean; dueRecord?: DueBin | null;
+  feed: Feed; conf?: Confidence; buckets: Buckets; useCorr: boolean; dueRecord?: DueBin | null; defenses?: AskDefenses | null;
 };
 export type Pick = {
   id: string; player_id: string; name: string; team: string; opp: string; pos: string; game_id: string; market: string; label: string;
@@ -29,6 +39,8 @@ export type Answer = {
   parlay?: { joint: number; independent: number; price?: number; legs: number }; notes: string[]; followups: string[];
   projections?: { name: string; team: string; pos: string; market: string; median: number; range: [number, number] }[];
   table?: { columns: string[]; rows: (string | number)[][] };
+  /** A detailed write-up for "why" questions. */
+  sections?: Section[];
 };
 
 const MIN_EDGE = 0.03;
@@ -507,9 +519,22 @@ export function answerWhy(d: AskData, ids: string[], market?: string, side?: "ov
   return {
     title: `Why ${top.label.toLowerCase().startsWith("anytime") ? `${name} to score` : `${name}: ${top.label}`}`,
     summary: `The model gives this a ${pct(top.p)} chance${top.tierData?.rate != null ? ` (${top.tier}: picks in that range have hit ${pct(top.tierData.rate)} of the time on unseen weeks)` : ""}. It weighs everything below together; no single factor decides it.`,
-    picks, notes: [...(top.facts ?? []), ...priceNote(d)],
-    followups: [`${name} all props`, "Who will fall short this week?"],
+    picks, sections: tidy([{ title: "The numbers behind it", lines: top.facts ?? [] }, { title: "Price, track record and matchup", lines: whyContext(d, top) }]), notes: priceNote(d),
+    followups: [`${name} all props`, `Why is ${top.team} favored?`, "Who will fall short this week?"],
   };
+}
+
+/** Price, tier record and the opponent's defense behind one "why" answer. */
+function whyContext(d: AskData, p: Pick): string[] {
+  const out: string[] = [];
+  if (p.price != null && p.book) {
+    const implied = 1 / dec(p.price);
+    out.push(`Best price ${fmtPrice(p.price)} at ${p.book} implies ${pct(implied)}; our ${pct(p.p)} is ${p.p - implied >= MIN_EDGE ? `a ${Math.round((p.p - implied) * 100)}-point edge` : p.p - implied > -MIN_EDGE ? "about the same, so no real edge" : `${Math.round((implied - p.p) * 100)} points below it, so the price is too high`}.`);
+  }
+  if (p.tierData?.rate != null) out.push(`${p.tier} tier: ${p.tierData.hits.toLocaleString()} of ${p.tierData.n.toLocaleString()} past picks in that range hit (${pct(p.tierData.rate)}) on weeks the model never saw${p.tierData.avg_chance != null ? `, against an average predicted chance of ${pct(p.tierData.avg_chance)}` : ""}.`);
+  const def = d.defenses?.teams.find((x) => x.defense === p.opp);
+  if (def?.available) out.push(...defenseLines(d, def, p.team).slice(0, 2));
+  return out;
 }
 
 export function answerGame(d: AskData, teams: string[], f: Filters): Answer {
@@ -529,7 +554,7 @@ export function answerGame(d: AskData, teams: string[], f: Filters): Answer {
   }
   return {
     title: ids.map(gameLabel).join(" · "), summary: `Most likely touchdown scorers${groups.some((x) => x.title.endsWith("props")) ? " and strongest prop sides" : ""}, both teams.`,
-    groups, notes: [...noteTier(groups.flatMap((x) => x.picks)), ...priceNote(d)], followups: [`Safest 2-leg same game parlay ${teams[0]}`, "One TD scorer from each game"],
+    groups, notes: [...noteTier(groups.flatMap((x) => x.picks)), ...priceNote(d)], followups: [`Why is ${teams[0]} favored?`, `Safest 2-leg same game parlay ${teams[0]}`, "One TD scorer from each game"],
   };
 }
 
@@ -879,6 +904,7 @@ export const EXAMPLES = [
   "Best matchups for WRs this week",
   "Highest scoring games this week",
   "Gibbs vs Henry",
+  "Why are these your top picks?",
   "How accurate is the model?",
 ];
 
@@ -941,6 +967,10 @@ function findPlayers(d: AskData, q: string, raw = q): { ids: string[]; ambiguous
   return { ids, ambiguous };
 }
 
+/** "Why is DET favored", "who wins Bears Packers", "break down KC at BUF": a team-level write-up. */
+const MATCHUP = /\b(why|explain\w*|favou?red|favou?rites?|underdogs?|who (wins|will win|should win|takes it)|winner|predict\w*|preview|break ?down|analy[sz]\w*|write ?up|deep dive|thoughts|your take|tell me about|compare|comparison|edge|better team|who('?s| is) better|how (do|does) .* match up)\b/;
+const WHY_PICKS = /\b(why|explain\w*|reasons?|reasoning|how come|what makes|justify|based on what|case for|break ?down|how confident|confidence in)\b/;
+
 export function parse(d: AskData, raw: string): Parsed {
   const q = ` ${norm(raw)} `;
   const filters: Filters = {};
@@ -950,7 +980,7 @@ export function parse(d: AskData, raw: string): Parsed {
   for (const tok of raw.split(/[^A-Za-z]+/)) if (tok.length >= 2 && tok === tok.toUpperCase() && CODES.has(tok) && !["QB", "RB", "WR", "TE"].includes(tok)) teams.add(tok);
   if (teams.size) filters.teams = [...teams];
   for (const [k, v] of Object.entries(DAYS)) if (q.includes(` ${k} `) || q.includes(` ${k}s `)) { filters.day = v; break; }
-  if (/\b(tonight|tonights)\b/.test(q)) filters.day = new Date().getDay();
+  if (/\b(tonight|tonights)\b/.test(q) && [...gameDays(d).values()].includes(new Date().getDay())) filters.day = new Date().getDay();
   if (/\b(include|including|even|any) (questionable|injured)\b/.test(q)) filters.safe = false;
 
   let market: string | undefined;
@@ -1006,6 +1036,8 @@ export function parse(d: AskData, raw: string): Parsed {
 
   if (/\b(what can you|help me|how do i use|what do you know)\b/.test(q)) return { ...base, intent: "help" };
   if ((!pl.ids.length || /\b(mean|meaning|define)\b/.test(q)) && !/\b(best|top|safest|give me|show me)\b/.test(q) && /\b(what (does|do|is|are)|whats|define|meaning|mean|how do you|how does (the|your|it)|how are)\b/.test(q) && answerGlossary(q)) return { ...base, intent: "glossary" };
+  if (!pl.ids.length && teams.size && price == null && (MATCHUP.test(q) || (teams.size >= 2 && /\b(or|better)\b/.test(q)))) return { ...base, intent: "matchup" };
+  if (!pl.ids.length && !teams.size && WHY_PICKS.test(q) && /\b(picks?|bets?|plays?|locks?|legs?|best|top|safest|these|them|your)\b/.test(q)) return { ...base, intent: "whypicks" };
   if (pl.ids.length && price != null) return { ...base, intent: "price" };
   if (pl.ids.length && line != null && market) return { ...base, intent: "playerline" };
   if (pl.ids.length && /\b(alt(ernate)? lines?|ladder|every line|all (the )?lines|how often|hit rates?|how many times)\b/.test(q)) return { ...base, intent: "ladder" };
@@ -1073,6 +1105,8 @@ export function answer(d: AskData, raw: string): Answer {
     case "value": a = answerValue(d, p.n ?? 8, f, p.market ? [p.market] : /\b(tds?|touchdowns?|scor)/.test(norm(raw)) ? ["td"] : undefined); break;
     case "props": a = answerProps(d, p.market as string, p.n ?? (p.line != null ? 10 : 8), f, p.side, p.line); break;
     case "game": a = answerGame(d, f.teams as string[], f); break;
+    case "matchup": a = answerMatchup(d, f.teams as string[]); break;
+    case "whypicks": a = answerWhyPicks(d, /\b(pick|bet|play|lock|leg)\b(?!s)/.test(norm(raw)) && !/\b(picks|bets|plays|locks|legs|these|them)\b/.test(norm(raw)) ? 1 : Math.min(p.n ?? 3, 5), f, p.noTd); break;
     case "top": a = answerTop(d, Math.min(p.n ?? 5, 25), f); break;
     default:
       return { title: "I can help with that if you phrase it like one of these", summary: "Ask about touchdown scorers, player props, parlays, value against the books, a team, a game, a player, or the model's record. Filters like position (WR), team (Bears) and day (Thursday) work in any question.", notes: [], followups: EXAMPLES };
@@ -1093,4 +1127,124 @@ export const pickJson = (p: Pick) => ({ player: p.name, team: p.team, opponent: 
 
 export const answerJson = (a: Answer) => ({ title: a.title, summary: a.summary, picks: a.picks?.map(pickJson),
   groups: a.groups?.map((g) => ({ title: g.title, picks: g.picks.map(pickJson) })), parlay: a.parlay ?? null,
-  projections: a.projections ?? null, table: a.table ?? null, notes: a.notes });
+  projections: a.projections ?? null, table: a.table ?? null, write_up: a.sections ?? null, notes: a.notes });
+
+/* ------------------------------------------------------------------ matchup write-up */
+const SCHEME_LABEL: Record<string, string> = { blitz_rate: "blitz rate", pressure_rate: "pressure rate (sack or QB hit)", man_rate: "man coverage", zone_rate: "zone coverage",
+  stacked_box_rate: "runs faced with 8+ in the box", light_box_rate: "runs faced with 6 or fewer in the box" };
+const f1 = (v: number) => v.toFixed(1);
+const POS_SHORT: Record<string, string> = { QB: "QBs", RB: "RBs", WR: "WRs", TE: "TEs" };
+
+/** What one defense has allowed and how it plays, against the league. */
+function defenseLines(d: AskData, def: AskDefense, offense: string): string[] {
+  const lg = d.defenses?.league;
+  const out: string[] = [];
+  if (!def.available) return [`${def.defense}: no completed games before this week.`];
+  out.push(`${def.defense} defense (${def.games} games before this week): ${def.points_allowed_pg != null ? `${f1(def.points_allowed_pg)} points` : ""}, ${f1(def.offensive_tds_allowed_pg)} offensive TDs and ${f1(def.xtd_allowed_pg)} expected TDs allowed a game`
+    + `${def.rz_td_rate_allowed != null ? `; red-zone trips end in a TD ${pct(def.rz_td_rate_allowed)} of the time${lg?.rz_td_rate != null ? ` (league ${pct(lg.rz_td_rate)})` : ""}` : ""}.`);
+  if (lg) {
+    const pos = (["RB", "WR", "TE", "QB"] as Pos[]).filter((p) => def.positions[p] && lg[p]?.tds_pg).map((p) => {
+      const m = def.positions[p].tds_pg / (lg[p] as { tds_pg: number }).tds_pg;
+      return { p, m, text: `${POS_SHORT[p]} ${m >= 1 ? "+" : ""}${Math.round((m - 1) * 100)}%` };
+    });
+    if (pos.length) {
+      out.push(`TDs allowed by position vs league average: ${pos.map((x) => x.text).join(", ")}.`);
+      const soft = pos.filter((x) => x.m >= 1.2).map((x) => POS_SHORT[x.p]);
+      if (soft.length) out.push(`${offense} gets a soft spot: ${def.defense} has given up the most against ${soft.join(" and ")}.`);
+    }
+  }
+  const sc = def.scheme?.rates, sl = d.defenses?.scheme_league;
+  if (sc && sl) {
+    const parts = Object.keys(SCHEME_LABEL).filter((k) => sc[k] != null && sl[k] != null).map((k) => `${SCHEME_LABEL[k]} ${pct(sc[k])} (league ${pct(sl[k])})`);
+    if (parts.length) out.push(`How it plays: ${parts.join(", ")}${def.scheme?.top_shell?.[0] ? `; most-used shell ${def.scheme.top_shell[0]}${def.scheme.top_shell[1] != null ? ` (${pct(def.scheme.top_shell[1])})` : ""}` : ""}.`);
+  }
+  return out;
+}
+
+/** Why one team is favored: the line's implied points, both defenses, schemes, injuries and the players most likely to produce. */
+export function answerMatchup(d: AskData, teams: string[]): Answer {
+  const gid = d.td.find((r) => r.game_id && teams.includes(r.team) && (teams.length < 2 || teams.includes(r.opponent ?? "")))?.game_id
+    ?? d.td.find((r) => r.game_id && teams.includes(r.team))?.game_id;
+  if (!gid) return { title: `No game for ${teams.join("/")} this week`, summary: "That team has no game with published chances this week (a bye, or the week is not built yet).", notes: [], followups: ["Highest scoring games this week"] };
+  const { away, home } = gameTeams(gid);
+  const implied = (t: string) => {
+    const v = d.td.find((r) => r.team === t && r.game_id === gid && typeof r.features?.team_implied_total === "number")?.features.team_implied_total;
+    if (typeof v === "number") return v;
+    for (const { rows } of Object.values(d.props)) {
+      const r = rows.find((x) => x.game_id === gid && (x.team === t ? x.evidence?.team_implied_total != null : x.opponent === t && x.evidence?.opp_implied_total != null));
+      if (r) return (r.team === t ? r.evidence!.team_implied_total : r.evidence!.opp_implied_total) as number;
+    }
+    return null;
+  };
+  const ia = implied(away), ih = implied(home);
+  const fav = ia != null && ih != null ? (ih >= ia ? home : away) : null;
+  const dog = fav === home ? away : home;
+  const line: string[] = [];
+  if (ia != null && ih != null) {
+    line.push(Math.abs(ih - ia) < 0.5 ? `The betting line has it about even: ${away} ${f1(ia)} and ${home} ${f1(ih)} implied points, total ${f1(ia + ih)}.`
+      : `${fav} is favored by about ${f1(Math.abs(ih - ia))}: the spread and total imply ${away} ${f1(ia)} and ${home} ${f1(ih)} points (total ${f1(ia + ih)}).`);
+  } else line.push("No spread or total is loaded for this game yet.");
+  line.push("The Lab does not model NFL spreads: the favorite is the betting market's call, and its implied points feed every player chance here. Below is what our data shows behind it.");
+  const def = (t: string) => d.defenses?.teams.find((x) => x.defense === t);
+  const sides: Section[] = [];
+  for (const [off, dfn] of [[fav ?? away, dog ?? home], [dog ?? home, fav ?? away]] as const) {
+    const x = def(dfn);
+    sides.push({ title: `${off} offense vs ${dfn} defense`, lines: [
+      implied(off) != null ? `${off} is expected to score ${f1(implied(off) as number)}.` : "",
+      ...(x ? defenseLines(d, x, off) : [`${dfn} defense numbers are not loaded.`])] });
+  }
+  if (fav) {
+    const a = def(dog), b = def(fav);
+    if (a?.available && b?.available && a.points_allowed_pg != null && b.points_allowed_pg != null)
+      sides.unshift({ title: `Why ${fav} is favored`, lines: [
+        `${dog}'s defense has allowed ${f1(a.points_allowed_pg)} points a game and ${f1(a.xtd_allowed_pg)} expected TDs; ${fav}'s has allowed ${f1(b.points_allowed_pg)} and ${f1(b.xtd_allowed_pg)}.`,
+        a.points_allowed_pg > b.points_allowed_pg ? `${fav} has the better defense so far by ${f1(a.points_allowed_pg - b.points_allowed_pg)} points a game, which matches the market making them the favorite.`
+          : `${dog} has actually allowed fewer points so far, so the market's lean toward ${fav} rests on more than defense (offense, quarterback, home field or schedule).`,
+        `${home} is at home.`] });
+  }
+  const inj = d.td.filter((r) => r.game_id === gid && status(r)).sort((x, y) => (y.p_model ?? 0) - (x.p_model ?? 0))
+    .map((r) => `${r.player_name} (${r.team} ${r.position}): ${status(r)}`);
+  const scorers: string[] = [];
+  for (const t of [away, home]) {
+    const top = tdPool(d, { teams: [t], teamOnly: true }).slice(0, 3);
+    if (top.length) scorers.push(`${t}: ${top.map((p) => `${p.name} ${pct(p.p)}${p.tier ? ` (${p.tier})` : ""}`).join(", ")}.`);
+  }
+  const props = Object.keys(d.props).flatMap((m) => propPool(d, m, { teams: [away, home], teamOnly: true }).slice(0, 2)).sort((x, y) => y.p - x.p).slice(0, 4)
+    .map((p) => `${p.name} (${p.team}) ${p.label}: ${pct(p.p)}${p.tier ? `, ${p.tier}${p.tierRate != null ? ` (that tier hit ${pct(p.tierRate)} on unseen weeks)` : ""}` : ""}.`);
+  const sections = tidy([
+    { title: "The line", lines: line },
+    ...sides,
+    { title: "Injury report", lines: inj.length ? inj : ["No skill players from either team are on the injury report."] },
+    { title: "Most likely touchdown scorers", lines: scorers },
+    { title: "Strongest prop sides", lines: props },
+    { title: "Good to know", lines: ["Defense numbers count only games before this week; early in the season they rest on few games.",
+      d.defenses?.coverage ?? "", "Ask \"why\" about any player here for his full breakdown."] },
+  ]);
+  return {
+    title: `${away} at ${home}${fav ? `: why ${fav} is favored` : ""}`,
+    summary: fav ? `${fav} is the betting favorite. Here is what the line, both defenses, the injury report and our player chances say about this game.` : "What our data says about this game.",
+    sections, notes: priceNote(d),
+    followups: [`${away} ${home} game`, `Safest 2-leg same game parlay ${home}`, ...(tdPool(d, { teams: [away, home], teamOnly: true })[0] ? [`Why ${tdPool(d, { teams: [away, home], teamOnly: true })[0].name}?`] : [])],
+  };
+}
+
+/** "Why these picks": each of the strongest proven legs with its full breakdown. */
+export function answerWhyPicks(d: AskData, n: number, f: Filters, noTd = false): Answer {
+  const picks = anyPool(d, f, noTd ? Object.keys(d.props) : undefined).filter((p) => isProven(d, p)).slice(0, n);
+  if (!picks.length) return { title: "No proven picks to explain", summary: "Nothing this week reaches a confidence tier that hit 50%+ on unseen weeks, so there is no pick to explain.", notes: [], followups: ["How accurate is the model?"] };
+  const sections: Section[] = [];
+  const out: Pick[] = [];
+  for (const p of picks) {
+    const w = answerWhy(d, [p.player_id], p.kind === "td" ? "td" : p.market, p.side === "yes" ? undefined : p.side);
+    const x = w.picks?.[0];
+    if (!x) continue;
+    out.push(x);
+    sections.push({ title: `${x.name} (${x.team}): ${x.label}, ${pct(x.p)}`, lines: [
+      `Our model gives ${x.name} a ${pct(x.p)} chance${x.kind === "td" ? " to score a rushing or receiving touchdown" : ""} against ${x.opp}.`,
+      ...(x.tierData?.rate != null ? [`${x.tier}: picks in that range hit ${pct(x.tierData.rate)} of ${x.tierData.n.toLocaleString()} on unseen weeks.`] : []),
+      ...(x.reasons ?? []).map((r) => `For: ${r}`), ...(x.against ?? []).map((r) => `Against: ${r}`), ...(x.facts ?? [])] });
+  }
+  return { title: out.length === 1 ? `Why ${out[0].name} is the top pick` : `Why these are the top ${out.length} picks`,
+    summary: "The strongest proven legs across every market, each with what supports it, what works against it and the numbers behind it.",
+    picks: out, sections: tidy(sections), notes: [...noteTier(out), ...priceNote(d)], followups: out.slice(0, 2).map((p) => `Why is ${p.team} favored?`) };
+}
