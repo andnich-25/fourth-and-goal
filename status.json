@@ -1,6 +1,6 @@
 {
   "date": "2026-10-23",
-  "ran_at": "2026-10-23T16:24:45+00:00",
+  "ran_at": "2026-10-23T22:54:36+00:00",
   "files": [
     {
       "file": "player_box_2019.csv",
@@ -54,7 +54,7 @@
   "espn": {
     "injuries": {
       "saved": "2026-10-23.json",
-      "items": 25
+      "items": 24
     },
     "scoreboard": {
       "saved": "2026-10-23.json",
@@ -66,20 +66,7 @@
     "errors": {}
   },
   "odds": {
-    "saved": "2026-10-23.json",
-    "game_lines": 432,
-    "props": 0,
-    "budget": {
-      "plan": "free",
-      "allowance": 500.0,
-      "reserve": 200.0,
-      "game_lines": true,
-      "props": false,
-      "cost": 2,
-      "reason": "free plan: player props need a paid plan"
-    },
-    "credits_remaining": 411.0,
-    "errors": []
+    "kept": "2026-10-23.json"
   },
   "license": "NBA box scores and schedules: sportsdataverse / hoopR (ESPN data), https://github.com/sportsdataverse/sportsdataverse-data. Injuries and scoreboard: ESPN public site feed."
 }
