@@ -179,3 +179,18 @@ def test_book_table_groups_each_books_lines():
     assert [b["book"] for b in t] == ["draftkings", "fanduel"]
     assert t[1]["spread"]["home"] == [-3.5, -112] and t[1]["ml"]["away"] == [None, 150] and t[0]["total"]["over"] == [55.5, -110]
     assert pipeline._hours("2026-10-20T15:00:00Z", "2026-10-22T15:00:00+00:00") == 48
+
+
+def test_scoreboard_falls_back_to_one_day_at_a_time(monkeypatch):
+    from datetime import datetime
+    calls = []
+
+    def fake(url, params=None):
+        calls.append(params["dates"])
+        if "-" in params["dates"]:
+            raise RuntimeError("HTTP Error 400: Bad Request")
+        return {"events": [{"id": "1"}, {"id": params["dates"]}]}, {}
+    monkeypatch.setattr(collect, "_get_json", fake)
+    data, params = collect._scoreboard(datetime(2026, 10, 23), log=lambda *_: None)
+    assert len(calls) == 9 and params["dates"] == "by day"
+    assert len(data["events"]) == 9        # game "1" listed every day is kept once
