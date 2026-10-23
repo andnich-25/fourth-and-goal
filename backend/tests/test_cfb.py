@@ -153,3 +153,29 @@ def test_postgame_resim_scores_more_for_the_offense_that_played_better():
     pool = np.zeros((10, 2))
     out = model.postgame(box, game, pool)
     assert out.post_margin.iloc[0] > 20 and abs(out.post_total.iloc[0] - (out.post_home + out.post_away).iloc[0]) < 1e-9
+
+
+def test_rating_ranks_bigger_kept_edges_higher_and_caps_unproven():
+    from cfb import rating
+    rng = np.random.default_rng(5)
+    n = 4000
+    p = rng.uniform(0.5, 0.6, n)
+    L = pd.DataFrame({"p": p, "won": (rng.uniform(size=n) < 0.5 + 0.5 * (p - 0.5)).astype(int), "season": rng.integers(2018, 2026, n),
+                      "market": "total", "dec": rating.DEC110, "q": 0.5})
+    L["ret"] = L.won * L.dec - 1
+    r = rating.fit(L)
+    lo, hi = rating.rate(r, "total", 0.51, None), rating.rate(r, "total", 0.59, None)
+    assert hi["rating"] > lo["rating"] and hi["fair_p"] < 0.59          # calibrated toward what really happened
+    m = {"market": "total", "p": 0.59, "proven": False}
+    assert pipeline.score_lean(m, r)["score"] <= pipeline.UNPROVEN_CAP
+    assert not rating.walk_forward(L).empty
+
+
+def test_book_table_groups_each_books_lines():
+    offers = [{"game_id": 1, "book": "fanduel", "market": "spreads", "side": "home", "point": -3.5, "price": -112},
+              {"game_id": 1, "book": "fanduel", "market": "h2h", "side": "away", "point": None, "price": 150},
+              {"game_id": 1, "book": "draftkings", "market": "totals", "side": "over", "point": 55.5, "price": -110}]
+    t = pipeline.book_table(offers)
+    assert [b["book"] for b in t] == ["draftkings", "fanduel"]
+    assert t[1]["spread"]["home"] == [-3.5, -112] and t[1]["ml"]["away"] == [None, 150] and t[0]["total"]["over"] == [55.5, -110]
+    assert pipeline._hours("2026-10-20T15:00:00Z", "2026-10-22T15:00:00+00:00") == 48
