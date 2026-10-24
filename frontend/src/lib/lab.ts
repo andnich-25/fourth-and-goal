@@ -31,8 +31,9 @@ export type LabPick = {
   rank?: number; frozen_at?: string; result?: LabResult; actual?: string;
 };
 
-/** Props and touchdowns need 6.0+ (a 60% chance); college picks need 7+, the band that beat the books in testing. */
-export const MIN_SCORE = 6;
+/** Only the most confident picks: a 70%+ chance to hit (inside the top "Strong" band of each sport's tested tiers), on top of each
+ *  sport's own proven rule. College picks must also be rated 7+; their calibrated chance is what counts here. */
+export const MIN_CHANCE = 0.7;
 export const BOARD_SIZE = 10;
 const RISKY = new Set(["Questionable", "Doubtful", "Out"]);
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -48,7 +49,7 @@ export function nflCandidates(d: AskData): LabPick[] {
     if (r.game_id && !kick.has(r.game_id)) { const k = easternToUtc(r.gameday, r.gametime); if (k) kick.set(r.game_id, k); }
     if (r.features?.report_status) status.set(r.player_id, String(r.features.report_status));
   }
-  return anyPool(d).filter((p) => isProven(d, p) && p.p * 10 >= MIN_SCORE && !RISKY.has(status.get(p.player_id) ?? "") && kick.has(p.game_id))
+  return anyPool(d).filter((p) => isProven(d, p) && p.p >= MIN_CHANCE && !RISKY.has(status.get(p.player_id) ?? "") && kick.has(p.game_id))
     .map((p) => nflPick(d, p, kick.get(p.game_id)!));
 }
 
@@ -88,7 +89,7 @@ export function nbaCandidates(slate: Slate, ctx: NbaCtx): LabPick[] {
   for (const r of slate.rows) {
     if (r.out || r.evidence.minutes_long < 20 || r.line < MIN_LINE || !games.has(r.game_id)) continue;
     const lean = leanOf(r);
-    if (!lean || lean.p * 10 < MIN_SCORE) continue;
+    if (!lean || lean.p < MIN_CHANCE) continue;
     const t = nbaTier(ctx.conf, lean.p);
     if (!t || t.tier === "Coin flip" || t.rate == null || t.rate < 0.5) continue;
     out.push(nbaPick(r, lean.side, lean.p, t, games.get(r.game_id)!, ctx));
@@ -118,7 +119,7 @@ export function cfbCandidates(week: Week, ctx: CfbCtx): LabPick[] {
   const seen = new Set<number>();
   const out: LabPick[] = [];
   for (const p of [...week.picks].sort((a, b) => b.score - a.score)) {
-    if (!cfbIsPick(p) || seen.has(p.game_id)) continue;
+    if (!cfbIsPick(p) || seen.has(p.game_id) || (p.fair_p ?? p.p) < MIN_CHANCE) continue;
     const g = week.games.find((x) => x.game_id === p.game_id);
     if (!g) continue;
     seen.add(p.game_id);
@@ -148,31 +149,24 @@ function cfbPick(p: CfbPick, g: Week["games"][number], ctx: CfbCtx): LabPick {
 
 /* ------------------------------------------------------------------ ranking */
 
-/** Best first: rating, then a real book line over a usual one, then how the pick's tier did in testing, then the chance. */
+/** Best first: the chance it hits (simulated and calibrated on past results), then a real book line over a usual one,
+ *  then how the pick's tier did in testing. */
 export function byStrength(a: LabPick, b: LabPick): number {
-  return b.score - a.score || Number(a.line_source === "usual") - Number(b.line_source === "usual")
-    || (b.tier_rate ?? 0) - (a.tier_rate ?? 0) || b.chance - a.chance;
+  return b.chance - a.chance || Number(a.line_source === "usual") - Number(b.line_source === "usual")
+    || (b.tier_rate ?? 0) - (a.tier_rate ?? 0) || b.score - a.score;
 }
 
-/** The top picks, one per game and one per player, numbered 1 (strongest) down. Fewer than n when fewer qualify.
- *  Each sport scores out of 10 on its own scale (NFL and NBA: the chance; college: the value at the price), so the
- *  sports take turns: round 1 is each sport's best pick, round 2 each sport's second best, and so on; within a round
- *  the higher rating goes first. A sport that runs out of proven picks leaves its turns to the others. */
+/** The top picks, one per game and one per player, numbered 1 (most likely to hit) down. Fewer than n when fewer qualify. */
 export function rankBoard(cands: LabPick[], n = BOARD_SIZE): LabPick[] {
   const games = new Set<string>(), players = new Set<string>();
-  const lists = new Map<Sport, LabPick[]>();
+  const out: LabPick[] = [];
   for (const c of [...cands].sort(byStrength)) {
     const g = `${c.sport}:${c.game_id}`, pl = c.player_id ? `${c.sport}:${c.player_id}` : "";
     if (games.has(g) || (pl && players.has(pl))) continue;
     games.add(g);
     if (pl) players.add(pl);
-    lists.set(c.sport, [...(lists.get(c.sport) ?? []), c]);
-  }
-  const out: LabPick[] = [];
-  for (let round = 0; out.length < n; round++) {
-    const turn = [...lists.values()].map((l) => l[round]).filter(Boolean).sort(byStrength);
-    if (!turn.length) break;
-    for (const c of turn) if (out.length < n) out.push({ ...c, rank: out.length + 1 });
+    out.push({ ...c, rank: out.length + 1 });
+    if (out.length === n) break;
   }
   return out;
 }
@@ -247,7 +241,7 @@ export function publish(s: LabState, sports: LabBoard["sports"], recentN = 30): 
   const n = s.board.length;
   return {
     generated_at: s.updated_at ?? new Date().toISOString(), board: s.board, sports,
-    note: n < BOARD_SIZE ? `Only ${n} ${n === 1 ? "pick reaches" : "picks reach"} the proven bar right now, so the list stops at ${n} instead of being padded with weaker plays.` : null,
+    note: n < BOARD_SIZE ? `Only ${n} ${n === 1 ? "pick reaches" : "picks reach"} the 70%+ bar right now, so the list stops at ${n} instead of being padded with weaker plays.` : null,
     record: { ...tally(settled), by_sport: by, since: s.frozen.length ? s.frozen.map((p) => p.kickoff).sort()[0] : null },
     recent: [...s.frozen].sort((a, b) => b.kickoff.localeCompare(a.kickoff)).slice(0, recentN),
   };
