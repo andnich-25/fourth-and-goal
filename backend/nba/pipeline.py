@@ -285,7 +285,19 @@ def record(d: pd.DataFrame) -> dict:
                           for m, g in r.groupby("market")],
             "vs_books": {"picks": int(len(priced)), "wins": int(priced.won.sum()), "units": units,
                          "roi": units / len(priced) if len(priced) else None},
-            "projection_check": projection_check(r), "post_game": post_game_review(r, d)}
+            "projection_check": projection_check(r), "post_game": post_game_review(r, d), "graded": graded_rows(r)}
+
+
+GRADED_DAYS = 14
+
+
+def graded_rows(r: pd.DataFrame) -> list[dict]:
+    """The last two weeks of graded leans, one small row each (the final stat included), so other pages (The Lab's
+    picks) can grade the same bets at their own line."""
+    days = sorted(r.date.unique())[-GRADED_DAYS:]
+    g = r[r.date.isin(days)]
+    return [{"date": x.date, "game_id": int(x.game_id), "player_id": str(int(float(x.player_id))), "market": x.market,
+             "line": float(x.line), "side": x.side, "actual": float(x.actual), "won": int(x.won)} for x in g.itertuples()]
 
 
 def projection_check(r: pd.DataFrame) -> list[dict]:

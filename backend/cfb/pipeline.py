@@ -393,7 +393,10 @@ def record(g: pd.DataFrame, summary: dict) -> dict:
     return {"games": int(r.game_id.nunique()), "picks": int(len(r)), "first_date": r.date.min(), "last_date": r.date.max(),
             "by_market_tier": by,
             "suggested": {"n": int(len(pk)), "hits": int(pk.won.sum()), "rate": float(pk.won.mean()) if len(pk) else None},
-            "recent": r[r.proven].sort_values("date", ascending=False).head(40).to_dict("records")}
+            "recent": r[r.proven].sort_values("date", ascending=False).head(40).to_dict("records"),
+            # Final scores of the last three weeks' graded games, so other pages (The Lab's picks) grade at their own line.
+            "finals": {str(gid): [float(fin.loc[gid].home_points), float(fin.loc[gid].away_points)]
+                       for gid in r[r.date >= (pd.Timestamp(r.date.max()) - pd.Timedelta(days=21)).strftime("%Y-%m-%d")].game_id.unique()}}
 
 
 INPUT_LABELS = {"plays": ("plays", "Pace (plays)"), "ypp": ("ypp", "Yards per play"), "turnovers": ("to", "Turnovers"),

@@ -65,14 +65,16 @@ const CFB_MOBILE = [CFB_NAV[0], CFB_NAV[1], CFB_NAV[3], CFB_NAV[6]];
 type Sport = "nfl" | "nba" | "cfb";
 const sportOf = (path: string): Sport => (path === "/nba" || path.startsWith("/nba/") ? "nba" : path === "/cfb" || path.startsWith("/cfb/") ? "cfb" : "nfl");
 
-/** NFL / CFB / NBA switch. Each sport keeps its own pages; the switch goes to that sport's home. */
-function SportSwitch({ sport }: { sport: Sport }) {
+/** NFL / CFB / NBA switch, plus The Lab's top 10 across all three. Each sport keeps its own pages; the switch goes to that sport's home. */
+function SportSwitch({ sport, top }: { sport: Sport; top: boolean }) {
   const base = "rounded-md px-2 py-1.5 text-sm font-bold tracking-wide transition-colors sm:px-3.5";
   const tab = (to: string, s: Sport, label: string) => (
-    <NavLink to={to} role="tab" aria-selected={sport === s} className={cn(base, sport === s ? "bg-accent text-accent-fg" : "text-muted hover:bg-raised hover:text-fg")}>{label}</NavLink>
+    <NavLink to={to} role="tab" aria-selected={!top && sport === s} className={cn(base, !top && sport === s ? "bg-accent text-accent-fg" : "text-muted hover:bg-raised hover:text-fg")}>{label}</NavLink>
   );
   return (
     <div className="flex rounded-lg border border-line bg-surface p-1" role="tablist" aria-label="Sport">
+      <NavLink to="/top10" role="tab" aria-selected={top} title="The Lab's top 10 picks across every sport"
+        className={cn(base, "whitespace-nowrap", top ? "bg-accent text-accent-fg" : "text-accent hover:bg-raised")}>Top 10</NavLink>
       {tab("/", "nfl", "NFL")}{tab("/cfb", "cfb", "CFB")}{tab("/nba", "nba", "NBA")}
     </div>
   );
@@ -184,7 +186,8 @@ export function Layout() {
   const sport = sportOf(loc.pathname);
   const nba = sport === "nba";
   const cfb = sport === "cfb";
-  const other = sport !== "nfl";   // NBA and CFB pages carry no NFL season/week query
+  const top = loc.pathname === "/top10";
+  const other = sport !== "nfl" || top;   // NBA, CFB and top-10 pages carry no NFL season/week query
   useSportTheme(sport);
   const sections = nba ? NBA_SECTIONS : cfb ? CFB_SECTIONS : SECTIONS;
   const mobile = nba ? NBA_MOBILE : cfb ? CFB_MOBILE : MOBILE;
@@ -233,7 +236,7 @@ export function Layout() {
           <button className="lg:hidden" aria-label="Open menu" onClick={() => setOpen(true)}><Menu className="h-5 w-5" /></button>
           {/* On phones the sport switch stands in for the logo so the header fits. */}
           <div className="hidden sm:block lg:hidden"><Logo compact nba={nba} cfb={cfb} /></div>
-          <SportSwitch sport={sport} />
+          <SportSwitch sport={sport} top={top} />
           <div className="flex-1" />
           {!other && <SeasonWeekPicker />}
           {!other && <div className="hidden sm:block"><StatusChip /></div>}

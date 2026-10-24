@@ -35,6 +35,7 @@ import CfbResearch from "./pages/cfb/CfbResearch";
 import CfbParlay from "./pages/cfb/CfbParlay";
 import CfbGames from "./pages/cfb/CfbGames";
 import HitRates from "./pages/HitRates";
+import LabPicks from "./pages/LabPicks";
 import { EmptyState } from "./components/ui";
 import { STATIC } from "./lib/api";
 
@@ -67,6 +68,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Route path="backtest" element={<Backtest />} />
               <Route path="data" element={<DataSync />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="top10" element={<LabPicks />} />
               <Route path="nba" element={<NbaHome />} />
               <Route path="nba/props" element={<NbaProps />} />
               <Route path="nba/builder" element={<NbaBuilder />} />
