@@ -253,7 +253,7 @@ def review_game(game: dict, box: pd.DataFrame, vol: dict, n: int | None = None) 
                 miss = {lv: abs(float(np.median(runs[lv][pid][st])) - act) for lv, _ in LEVELS if st in runs[lv].get(pid, {})}
                 if len(miss) < len(LEVELS):
                     continue
-                rows.append({"market": m, **who, "pre": round(float(np.median(d[st])), 1), "actual": act,
+                rows.append({"market": m, **who, "pre": round(float(np.median(d[st])), 1), "mean": round(float(np.mean(d[st])), 2), "actual": act,
                              "q10": float(np.percentile(d[st], 10)), "q90": float(np.percentile(d[st], 90)), "miss": miss})
     for x in inputs:
         x["pre"], x["actual"] = round(float(x["pre"]), 3), round(float(x["actual"]), 3)
@@ -280,7 +280,8 @@ def _market_table(rows: list[dict]) -> list[dict]:
         base = max(miss["pregame"], 1e-9)
         share = {lv: max(miss[prev] - miss[lv], 0.0) / base for (prev, _), (lv, _) in zip(LEVELS, LEVELS[1:])}
         out.append({"market": m, "label": props.MARKETS[m]["label"], "n": len(sel),
-                    "bias": round(float(np.mean([r["actual"] - r["pre"] for r in sel])), 2),
+                    # against the simulated average: yards are skewed, so the median sits below it by design
+                    "bias": round(float(np.mean([r["actual"] - r.get("mean", r["pre"]) for r in sel])), 2),
                     "in_range": round(float(np.mean([r["q10"] <= r["actual"] <= r["q90"] for r in sel])), 3),
                     "miss": {lv: round(v, 2) for lv, v in miss.items()},
                     "share": {lv: round(v, 3) for lv, v in share.items()}, "chance": round(miss["efficiency"] / base, 3)})
@@ -334,12 +335,15 @@ def _matchup(gid: str) -> str:
     return f"{parts[2]} at {parts[3]}" if len(parts) == 4 else gid
 
 
+CACHE_VERSION = 2
+
+
 def _cache_key(game: dict, box: pd.DataFrame, vol: dict, n) -> str:
     """Changes when the frozen game or its box score changes (stat corrections), so only those games are rerun."""
     gid = game["game_id"]
     b = box.loc[gid] if gid in box.index.get_level_values(0) else pd.DataFrame()
     stats = [round(float(b[s].sum()), 1) for s in ("targets", "receptions", "rec_yards", "carries", "rush_yards", "attempts", "pass_yards")] if len(b) else []
-    return json.dumps([game.get("frozen_at"), n, stats, sorted((t, v) for (g, t), v in vol.items() if g == gid)], default=str)
+    return json.dumps([CACHE_VERSION, game.get("frozen_at"), n, stats, sorted((t, v) for (g, t), v in vol.items() if g == gid)], default=str)
 
 
 def report(c, n: int | None = None, log=print) -> dict:
@@ -376,8 +380,12 @@ def report(c, n: int | None = None, log=print) -> dict:
     rows = [r for g in games for r in g["rows"]]
     inputs = [x for g in games for x in g["inputs"]]
     params = max(lastg, key=lambda g: g.get("frozen_at") or "")["params"]
-    misses = sorted([dict(r, game_id=g["game_id"], cause=_cause(r["miss"])) for g in lastg for r in g["rows"]],
-                    key=lambda r: -r["miss"]["pregame"])[:10]
+    misses, seen = [], set()
+    for r in sorted([dict(r, game_id=g["game_id"], cause=_cause(r["miss"])) for g in lastg for r in g["rows"] if r["market"] != "rush_rec_yards"],
+                    key=lambda r: -r["miss"]["pregame"]):
+        if r["player"] not in seen and len(misses) < 10:   # one line per player
+            seen.add(r["player"])
+            misses.append(r)
     mk = _market_table(rows)
     it = _input_table(inputs, [x for g in lastg for x in g["inputs"]], params, corrections)
     notes = []

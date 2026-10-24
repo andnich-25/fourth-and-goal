@@ -26,7 +26,7 @@ function MarketTable({ rows }: { rows: MarketRow[] }) {
   return (
     <TableWrap>
       <table className="w-full [&_td]:px-1.5 [&_th]:px-1.5 [&_th]:tracking-normal sm:[&_td]:px-3 sm:[&_th]:px-3">
-        <thead><tr><Th>Stat</Th>{LEVELS.map((l) => <Th key={l} className="text-right">{HEAD[l]}</Th>)}<Th className="text-right" title="Actual minus the pregame sim: positive means players beat it">Ran</Th></tr></thead>
+        <thead><tr><Th>Stat</Th>{LEVELS.map((l) => <Th key={l} className="text-right">{HEAD[l]}</Th>)}<Th className="text-right" title="Actual minus the pregame sim's average: positive means players beat it">Ran</Th></tr></thead>
         <tbody>{rows.map((m) => (
           <tr key={m.market} className="border-b border-line/60">
             <Td className="whitespace-normal">{m.label} <span className="text-xs text-muted">({m.n})</span></Td>
@@ -35,6 +35,18 @@ function MarketTable({ rows }: { rows: MarketRow[] }) {
           </tr>))}</tbody>
       </table>
     </TableWrap>
+  );
+}
+
+function GameCard({ g }: { g: NonNullable<SimReport["game_cards"]>[number] }) {
+  return (
+    <div className="rounded-lg border border-line p-3">
+      <div className="flex items-baseline justify-between gap-2"><span className="font-medium">{g.matchup}</span>
+        <span className="text-xs text-muted">{g.teams.map((t) => `${t.team} ${t.points}`).join(" · ")}</span></div>
+      <div className="mt-1 text-xs text-muted">{g.teams.map((t) => `${t.team}: ${t.attempts} passes (sim ${num(t.exp_attempts, 0)}), ${t.carries} runs (sim ${num(t.exp_carries, 0)})`).join(" · ")}</div>
+      {g.notes.length ? <ul className="mt-1.5 list-disc space-y-0.5 pl-5">{g.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+        : <p className="mt-1.5 text-muted">Inputs close to the pregame sim.</p>}
+    </div>
   );
 }
 
@@ -89,14 +101,10 @@ export function SimReportCard() {
           {!!d.game_cards?.length && (
             <div>
               <div className="font-medium">Week {d.last_week?.week} games</div>
-              <div className="mt-2 grid gap-3 md:grid-cols-2">{d.game_cards.map((g) => (
-                <div key={g.game_id} className="rounded-lg border border-line p-3">
-                  <div className="flex items-baseline justify-between gap-2"><span className="font-medium">{g.matchup}</span>
-                    <span className="text-xs text-muted">{g.teams.map((t) => `${t.team} ${t.points}`).join(" · ")}</span></div>
-                  <div className="mt-1 text-xs text-muted">{g.teams.map((t) => `${t.team}: ${t.attempts} passes (sim ${num(t.exp_attempts, 0)}), ${t.carries} runs (sim ${num(t.exp_carries, 0)})`).join(" · ")}</div>
-                  {g.notes.length ? <ul className="mt-1.5 list-disc space-y-0.5 pl-5">{g.notes.map((n) => <li key={n}>{n}</li>)}</ul>
-                    : <p className="mt-1.5 text-muted">Inputs close to the pregame sim.</p>}
-                </div>))}</div>
+              <div className="mt-2 grid gap-3 md:grid-cols-2">{d.game_cards.slice(0, 4).map((g) => <GameCard key={g.game_id} g={g} />)}</div>
+              {d.game_cards.length > 4 && (
+                <details className="mt-3"><summary className="cursor-pointer text-xs text-muted">All {d.game_cards.length} games</summary>
+                  <div className="mt-2 grid gap-3 md:grid-cols-2">{d.game_cards.slice(4).map((g) => <GameCard key={g.game_id} g={g} />)}</div></details>)}
             </div>)}
 
           {!!d.biggest_misses?.length && (
