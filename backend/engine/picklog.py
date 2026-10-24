@@ -231,21 +231,34 @@ def _score_check(c, weeks: list[tuple[int, int]]) -> dict | None:
             "margin_typical_miss": round(sorted(abs(x) for x in mar)[len(mar) // 2], 1)}
 
 
+RECENT_WEEKS = 3
+
+
+def _recent_rows(rows: list[dict]) -> list[dict]:
+    """Every settled pick (graded or void) from the last few weeks, one small row each, so other pages (The Lab's picks)
+    can grade the same bets without the database."""
+    weeks = sorted({(r["season"], r["week"]) for r in rows})[-RECENT_WEEKS:]
+    return [{k: r.get(k) for k in ("season", "week", "game_id", "player_id", "market", "side", "line", "status", "actual", "result")}
+            for r in rows if (r["season"], r["week"]) in weeks]
+
+
 def report(c) -> dict:
     files = sorted(picks_dir().glob("*.json")) if picks_dir().exists() else []
-    weeks, graded = [], []
+    weeks, graded, settled = [], [], []
     for f in files:
         w = json.loads(f.read_text())
         rows = grade(c, w["rows"], w["season"], w["week"])
         g = [r for r in rows if r["status"] == "graded"]
+        settled += [dict(r, season=w["season"], week=w["week"]) for r in rows if r["status"] != "pending"]
         graded += [dict(r, season=w["season"], week=w["week"]) for r in g]
         weeks.append({"season": w["season"], "week": w["week"], "picks": len(rows), "graded": len(g),
                       "void": sum(r["status"] == "void" for r in rows), "pending": sum(r["status"] == "pending" for r in rows),
                       "featured": _summary([r for r in g if r["featured"]]), "all": _summary(g)})
     from . import gamesim  # noqa: PLC0415
     sim_review = gamesim.latest_review()
+    recent = _recent_rows(settled)
     if not graded:
-        return {"available": False, "created_at": utcnow(), "weeks": weeks, "sim_review": sim_review,
+        return {"available": False, "created_at": utcnow(), "weeks": weeks, "sim_review": sim_review, "recent_rows": recent,
                 "empty_reason": "Picks are saved before every kickoff starting with 2026 Week 7. The first results appear after those games are final."}
     by = lambda key: sorted({key(r) for r in graded})  # noqa: E731
     tiers = {kind: [{"tier": t, **_summary([r for r in graded if r["kind"] == kind and r["tier"] == t])}
@@ -265,7 +278,7 @@ def report(c) -> dict:
                           **_summary([r for r in graded if r["market"] == m])} for m in by(lambda r: r["market"])],
            "by_side": [{"side": s, **_summary([r for r in graded if r["side"] == s])} for s in by(lambda r: r["side"])],
            "calibration": bins, "weeks": weeks, "drift": drift, "drift_min_n": DRIFT_MIN_N,
-           "sim_review": sim_review, "projections": _projection_check(graded), "scores": _score_check(c, sorted({(r["season"], r["week"]) for r in graded})),
+           "sim_review": sim_review, "recent_rows": recent, "projections": _projection_check(graded), "scores": _score_check(c, sorted({(r["season"], r["week"]) for r in graded})),
            "last_week": {"season": last[0], "week": last[1], "featured_misses": [
                {k: r[k] for k in ("player_name", "team", "market", "side", "line", "p", "actual", "tier")} for r in misses]},
            "method": ["Picks are saved by every site update and frozen at each game's kickoff, so results are never graded with hindsight.",

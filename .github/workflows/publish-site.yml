@@ -51,10 +51,10 @@ jobs:
           key: nfl-site-${{ github.run_id }}
           restore-keys: nfl-site-
 
-      # Every pick the site suggests is saved before kickoff and graded after the game (engine/picklog.py).
-      # The saved picks must survive between runs, so they live on the nfl-data branch.
+      # Every pick the site suggests is saved before kickoff and graded after the game (engine/picklog.py), and so is
+      # The Lab's top 10 (frontend/scripts/lab-picks.ts, on every run). The saved picks must survive between runs,
+      # so they live on the nfl-data branch.
       - name: Check out the nfl-data branch (created on the first run)
-        if: env.NBA_ONLY != 'true' || steps.nflsite.outputs.cache-matched-key == ''
         run: |
           if git ls-remote --exit-code --heads origin nfl-data >/dev/null; then
             git fetch --depth 1 origin nfl-data
@@ -157,12 +157,33 @@ jobs:
           key: cfb-site-${{ github.run_id }}
           restore-keys: cfb-site-
 
+      # The Lab's top 10 across NFL, college football and NBA: ranked from every sport's fresh numbers, frozen at each
+      # game's start and graded after the final. A failure here leaves the page on its last board; the site still publishes.
+      - name: Build The Lab's top 10
+        working-directory: frontend
+        env:
+          LAB_DATA: ${{ github.workspace }}/site-data
+          LAB_ARCHIVE: ${{ github.workspace }}/pick-archive/lab
+        run: |
+          npm ci
+          npx vite-node scripts/lab-picks.ts || echo "::warning::The Lab's top 10 was not rebuilt this run"
+
+      - name: Save The Lab's top 10 to the nfl-data branch
+        working-directory: pick-archive
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -qm "Lab picks $(date -u +%F)"
+          for i in 1 2 3 4; do git push origin HEAD:nfl-data && exit 0; sleep $((2**i)); git pull --rebase -q origin nfl-data || true; done
+          exit 1
+
       - name: Build website
         working-directory: frontend
         env:
           VITE_STATIC: "1"
         run: |
-          npm ci
           npm run build
           cp -r ../site-data dist/data
           touch dist/.nojekyll

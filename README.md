@@ -58,6 +58,7 @@ cd frontend && npm run typecheck && npm test && npm run build
 | Route | Page |
 |---|---|
 | `/` | Weekly overview: Top Three watchlist, model/data status, matchup strip with market-implied totals, scoring-area volume leaders, defense vulnerabilities, walk-forward performance |
+| `/top10` | The Lab's top 10: the strongest proven picks across NFL, college football and NBA, ranked 1 to 10 with a write-up each. Built on every site refresh by `frontend/scripts/lab-picks.ts`; a pick on the list when its game starts is frozen and graded after the final (state kept in `lab/` on the nfl-data branch) |
 | `/rankings` | All eligible players. Server-side sort, filter, paging; column toggles; pin up to 3; CSV export; expandable "why ranked here"; card layout on mobile |
 | `/props` | Player props (passing, rushing, receiving): projection, 10–90% range, and for validated markets the chance of going over a line you type |
 | `/trends` | Who is scoring this season: which pregame metrics separated scorers, where TDs start, leaders, generous defenses |
