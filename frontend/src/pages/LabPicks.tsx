@@ -30,13 +30,13 @@ export default function LabPicks() {
     <div className="space-y-5">
       <PageTitle kicker={b ? `NFL · College football · NBA · updated ${chicago(b.generated_at)}` : "All sports"} title="The Lab's top 10" />
       <p className="-mt-3 max-w-3xl text-sm text-muted">
-        The strongest plays on the board across every sport, best first. Every pick comes from a tier that beat its mark on games the models never saw.
-        Tap a pick for the full write-up.
+        The plays most likely to win across every sport, ranked by their chance to hit: #1 is the surest. Only picks with a 70%+ chance from 5,000-game
+        simulations and tested tiers make it. Tap a pick for the full write-up.
       </p>
       {q.isLoading && <Card><LoadingBlock rows={6} className="p-5" /></Card>}
       {q.isError && <Notice title="Not published yet">{(q.error as Error).message}</Notice>}
       {b?.note && <Notice tone="info">{b.note}</Notice>}
-      {b && !b.board.length && <Notice title="No picks right now">Nothing on the board reaches the proven bar. Picks appear as lines are posted and each sport refreshes.</Notice>}
+      {b && !b.board.length && <Notice title="No picks right now">Nothing on the board reaches a 70% chance from a proven tier. Picks appear as lines are posted and each sport refreshes.</Notice>}
 
       {!!b?.board.length && (
         <Card className="overflow-hidden">
@@ -49,10 +49,10 @@ export default function LabPicks() {
       {b && <RecordCard b={b} />}
 
       <Card><CardBody className="space-y-1.5 text-xs text-muted">
-        <p><b className="text-fg">How the list is made.</b> Each sport offers only the picks it already features: NFL and NBA props from confidence tiers that hit 50%+ on unseen games
-          (6.0+ out of 10, which is a 60%+ chance), and college bets rated 7+ (the band that beat the books in testing). Each sport rates out of 10 on its own scale
-          (NFL and NBA: the chance it hits; college: the value at the price), so the sports take turns: each sport's best pick first, then each sport's second best, and so on,
-          with the higher rating first within a turn. Ties go to a real sportsbook line, then to the tier's tested record. One pick per game and per player.</p>
+        <p><b className="text-fg">How the list is made.</b> Each sport offers only the picks it already features: NFL and NBA props from confidence tiers that hit 50%+ on unseen games,
+          and college bets rated 7+. Of those, only picks with a 70%+ chance to hit make the list (simulated, then calibrated against how similar picks really did), ranked by that
+          chance, highest first. Ties go to a real sportsbook line, then to the tier's tested record. One pick per game and per player. Most college bets land near 55%, so
+          they rarely make it. Even a 90% pick loses 1 time in 10: the "tested" figure on each pick is how often its tier actually hit on games the models never saw.</p>
         <p>The list refreshes with each sport's data (latest box scores, injury reports and lines). A pick on the list when its game starts is frozen exactly as shown and graded after the final.
           Research, not betting advice. No pick is guaranteed.</p>
       </CardBody></Card>
@@ -75,7 +75,7 @@ function PickRow({ p, open, onToggle }: { p: LabPick; open: boolean; onToggle: (
           <div className="mt-1 hidden text-sm text-muted sm:block">{p.headline}</div>
         </div>
         <div className="shrink-0 text-right">
-          <div><span className="font-display text-xl font-bold">{p.score.toFixed(1)}</span><span className="text-xs text-muted">/10</span></div>
+          <div><span className="font-display text-xl font-bold">{pct(p.chance, 0)}</span> <span className="text-xs text-muted">to hit</span></div>
           {p.price != null && <div className="text-xs text-muted">{price(p.price)}{p.book ? ` ${p.book}` : ""}</div>}
           {p.result ? <ResultBadge p={p} /> : p.tier && <div className="text-[11px] text-muted">{p.tier}{p.tier_rate != null ? ` · ${pct(p.tier_rate, 0)} tested` : ""}</div>}
         </div>
@@ -134,7 +134,7 @@ function RecordCard({ b }: { b: LabBoard }) {
                 <div className="truncate font-medium">{p.bet}</div>
                 <div className="truncate text-xs text-muted">{p.matchup} · {when(p.kickoff)}{p.actual ? ` · ${p.actual}` : ""}</div>
               </div>
-              <span className="text-xs text-muted">{p.score.toFixed(1)}</span>
+              <span className="text-xs text-muted">{pct(p.chance, 0)}</span>
               {p.result ? <ResultBadge p={p} /> : <Badge>Pending</Badge>}
             </li>
           ))}

@@ -4,26 +4,23 @@ import type { NbaConfidence, NbaRow, Slate } from "./nba";
 
 const pick = (o: Partial<LabPick>): LabPick => ({
   id: o.id ?? Math.random().toString(36), sport: "nba", game_id: "1", kickoff: "2026-10-24T23:00:00Z", matchup: "A at B", bet: "x", who: "x",
-  market: "points", market_label: "Points", side: "over", line: 20.5, line_source: "book", price: null, book: null, score: 6.5, chance: 0.65,
+  market: "points", market_label: "Points", side: "over", line: 20.5, line_source: "book", price: null, book: null, score: 7.5, chance: 0.75,
   tier: "Strong", tier_rate: 0.7, tier_n: 100, headline: "", sections: [], link: "/", ...o,
 });
 const sports = { nfl: { loaded: true, candidates: 0 }, nba: { loaded: true, candidates: 0 }, cfb: { loaded: true, candidates: 0 } };
 
 describe("rankBoard", () => {
-  it("lets the sports take turns, best first within each round, one per game and per player", () => {
+  it("ranks the likeliest to hit first, one per game and per player, numbered from 1", () => {
     const b = rankBoard([
-      pick({ id: "a", score: 6.4, game_id: "1", player_id: "p1" }),
-      pick({ id: "b", score: 7.1, game_id: "1", player_id: "p2" }),
-      pick({ id: "c", sport: "cfb", score: 8.2, game_id: "1" }),
-      pick({ id: "d", score: 6.9, game_id: "2", player_id: "p2" }),
-      pick({ id: "e", score: 6.9, game_id: "3", player_id: "p3", line_source: "usual" }),
-      pick({ id: "f", score: 6.9, game_id: "4", player_id: "p4" }),
+      pick({ id: "a", chance: 0.70, game_id: "1", player_id: "p1" }),
+      pick({ id: "b", chance: 0.82, game_id: "1", player_id: "p2" }),
+      pick({ id: "c", sport: "cfb", chance: 0.66, score: 9.7, game_id: "1" }),
+      pick({ id: "d", chance: 0.75, game_id: "2", player_id: "p2" }),
+      pick({ id: "e", chance: 0.74, game_id: "3", player_id: "p3", line_source: "usual" }),
+      pick({ id: "f", chance: 0.74, game_id: "4", player_id: "p4" }),
     ]);
-    expect(b.map((p) => [p.id, p.rank])).toEqual([["c", 1], ["b", 2], ["f", 3], ["e", 4]]);
-    const mixed = rankBoard([pick({ id: "c1", sport: "cfb", score: 9.7, game_id: "1" }), pick({ id: "c2", sport: "cfb", score: 9.5, game_id: "2" }),
-      pick({ id: "n1", sport: "nfl", score: 8.7, game_id: "3", player_id: "1" }), pick({ id: "n2", sport: "nfl", score: 6.1, game_id: "4", player_id: "2" }),
-      pick({ id: "n3", sport: "nfl", score: 6.0, game_id: "5", player_id: "3" })]);
-    expect(mixed.map((p) => p.id)).toEqual(["c1", "n1", "c2", "n2", "n3"]);
+    // a high college value rating does not lift a 66% pick above more likely ones
+    expect(b.map((p) => [p.id, p.rank])).toEqual([["b", 1], ["f", 2], ["e", 3], ["c", 4]]);
   });
   it("stops at 10 and returns fewer when fewer qualify", () => {
     expect(rankBoard(Array.from({ length: 14 }, (_, i) => pick({ game_id: String(i), player_id: String(i) }))).length).toBe(10);
@@ -62,7 +59,7 @@ describe("advance", () => {
     const started = pick({ id: "s", game_id: "9", player_id: "5", kickoff: "2026-10-24T23:00:00Z", rank: 1 });
     const later = pick({ id: "l", game_id: "10", player_id: "6", kickoff: "2026-10-25T01:00:00Z", rank: 2 });
     const s = advance({ updated_at: "2026-10-24T22:40:00Z", board: [started, later], frozen: [] },
-      [{ ...started, score: 9.9 }, later, pick({ id: "n", game_id: "11", player_id: "7", kickoff: "2026-10-25T00:00:00Z", score: 7 })], {}, now);
+      [{ ...started, score: 9.9 }, later, pick({ id: "n", game_id: "11", player_id: "7", kickoff: "2026-10-25T00:00:00Z", chance: 0.8 })], {}, now);
     expect(s.frozen.map((p) => [p.id, p.rank, p.frozen_at])).toEqual([["s", 1, "2026-10-24T22:40:00Z"]]);
     expect(s.board.map((p) => p.id)).toEqual(["n", "l"]);
     // a second run does not freeze it twice, and grades it once the result is in
@@ -88,7 +85,7 @@ const nbaRow = (id: string, game: number, mu: number, line: number, extra: Parti
 });
 
 describe("nbaCandidates", () => {
-  it("keeps only proven, 6.0+ leans of rotation players who are not out, each with a write-up", () => {
+  it("keeps only proven, 70%+ leans of rotation players who are not out, each with a write-up", () => {
     const tier = (name: string, lo: number, hi: number, rate: number) => ({ tier: name, lo, hi, n: 1000, hits: 0, rate, avg_chance: null, ci: [null, null] as [null, null] });
     const conf = { props: { first_season: 2022, tiers: [tier("Coin flip", 0.5, 0.55, 0.5), tier("Lean", 0.55, 0.6, 0.56), tier("Strong", 0.6, 1, 0.68)],
       by_side: { over: [], under: [] }, note: "", by_market: [] } } as NbaConfidence;
@@ -97,7 +94,7 @@ describe("nbaCandidates", () => {
       rows: [nbaRow("1", 1, 28, 21.5), nbaRow("2", 1, 20, 19.5), nbaRow("3", 1, 28, 21.5, { out: true }), nbaRow("4", 1, 28, 21.5, { evidence: { ...nbaRow("4", 1, 1, 1).evidence, minutes_long: 12 } })] };
     const c = nbaCandidates(slate, { conf });
     expect(c.map((p) => p.player_id)).toEqual(["1"]);
-    expect(c[0].score).toBeGreaterThanOrEqual(6);
+    expect(c[0].chance).toBeGreaterThanOrEqual(0.7);
     expect(c[0].tier).toBe("Strong");
     expect(c[0].sections.length).toBeGreaterThan(2);
     expect(c[0].kickoff).toBe("2026-10-24T23:30:00Z");
