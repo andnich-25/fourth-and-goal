@@ -4,6 +4,7 @@ import { Activity } from "lucide-react";
 import { api } from "@/lib/api";
 import { num, pct } from "@/lib/format";
 import { Card, CardBody, CardHeader, Stat, TableWrap, Td, Th } from "@/components/ui";
+import type { SimReport } from "@/components/SimReport";
 
 type S = { n: number; hits: number; rate: number | null; avg_chance: number | null; ci: [number | null, number | null] | null; drift: string | null };
 type WeekRow = { season: number; week: number; picks: number; graded: number; void: number; pending: number; featured: S; all: S };
@@ -13,6 +14,7 @@ export type LiveRecord = {
   projections?: { market: string; label: string; n: number; typical_miss: number; bias: number; in_range: number }[];
   scores?: { games: number; total_typical_miss: number; total_bias: number; overs: number; margin_typical_miss: number } | null;
   sim_review?: SimReview | null;
+  sim_report?: SimReport | null;
   last_week?: { season: number; week: number; featured_misses: { player_name: string; team: string; market: string; side: string; line: number | null; p: number; actual: number | null; tier: string }[] };
 };
 
@@ -56,7 +58,7 @@ export function LiveRecordCard() {
       <CardBody className="space-y-4">
         {!d.available ? (<>
           <p className="text-sm text-muted">{d.empty_reason}{pendingWeek ? ` ${pendingWeek.picks.toLocaleString()} Week ${pendingWeek.week} picks are saved and waiting on results.` : ""}</p>
-          {d.sim_review && <SimReviewBlock r={d.sim_review} />}
+          {d.sim_review && !d.sim_report?.available && <SimReviewBlock r={d.sim_review} />}
         </>) : <>
           <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
             <Stat label="Picks graded" value={d.graded?.toLocaleString() ?? "0"} sub={`${d.weeks.filter((w) => w.graded).length} weeks`} />
@@ -95,7 +97,7 @@ export function LiveRecordCard() {
               </TableWrap>
             </div>)}
           {d.scores && <p className="text-sm text-muted">Game scores: the betting totals the models use missed the final combined score by {num(d.scores.total_typical_miss, 1)} points in a typical game ({d.scores.overs} of {d.scores.games} went over), and the spread missed the final margin by {num(d.scores.margin_typical_miss, 1)}.</p>}
-          {d.sim_review && <SimReviewBlock r={d.sim_review} />}
+          {d.sim_review && !d.sim_report?.available && <SimReviewBlock r={d.sim_review} />}
           {!!d.last_week?.featured_misses.length && (
             <div className="text-sm">
               <div className="font-medium">Featured picks that missed in Week {d.last_week.week}</div>

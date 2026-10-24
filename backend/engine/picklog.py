@@ -254,11 +254,12 @@ def report(c) -> dict:
         weeks.append({"season": w["season"], "week": w["week"], "picks": len(rows), "graded": len(g),
                       "void": sum(r["status"] == "void" for r in rows), "pending": sum(r["status"] == "pending" for r in rows),
                       "featured": _summary([r for r in g if r["featured"]]), "all": _summary(g)})
-    from . import gamesim  # noqa: PLC0415
+    from . import gamesim, simreview  # noqa: PLC0415
     sim_review = gamesim.latest_review()
+    sim_report = simreview.latest()
     recent = _recent_rows(settled)
     if not graded:
-        return {"available": False, "created_at": utcnow(), "weeks": weeks, "sim_review": sim_review, "recent_rows": recent,
+        return {"available": False, "created_at": utcnow(), "weeks": weeks, "sim_review": sim_review, "sim_report": sim_report, "recent_rows": recent,
                 "empty_reason": "Picks are saved before every kickoff starting with 2026 Week 7. The first results appear after those games are final."}
     by = lambda key: sorted({key(r) for r in graded})  # noqa: E731
     tiers = {kind: [{"tier": t, **_summary([r for r in graded if r["kind"] == kind and r["tier"] == t])}
@@ -278,7 +279,7 @@ def report(c) -> dict:
                           **_summary([r for r in graded if r["market"] == m])} for m in by(lambda r: r["market"])],
            "by_side": [{"side": s, **_summary([r for r in graded if r["side"] == s])} for s in by(lambda r: r["side"])],
            "calibration": bins, "weeks": weeks, "drift": drift, "drift_min_n": DRIFT_MIN_N,
-           "sim_review": sim_review, "recent_rows": recent, "projections": _projection_check(graded), "scores": _score_check(c, sorted({(r["season"], r["week"]) for r in graded})),
+           "sim_review": sim_review, "sim_report": sim_report, "recent_rows": recent, "projections": _projection_check(graded), "scores": _score_check(c, sorted({(r["season"], r["week"]) for r in graded})),
            "last_week": {"season": last[0], "week": last[1], "featured_misses": [
                {k: r[k] for k in ("player_name", "team", "market", "side", "line", "p", "actual", "tier")} for r in misses]},
            "method": ["Picks are saved by every site update and frozen at each game's kickoff, so results are never graded with hindsight.",
@@ -286,6 +287,7 @@ def report(c) -> dict:
                       "Players who did not play are void and left out.",
                       f"A tier is flagged as drifting once it has {DRIFT_MIN_N}+ graded picks and its 95% interval no longer contains the chance the site gave.",
                       "Each projection is also checked against the final stat (typical miss, whether it ran high or low, how often the 8-in-10 range held), and the betting lines behind team scoring against the final scores.",
+                      "Every game's simulation is frozen at kickoff too, and after the final it is run again with what really happened (who played, team volume, roles, efficiency) to show which pregame input was off.",
                       "The site refreshes before every game window (Thursday, Saturday, Sunday morning, Sunday evening, Monday) with the latest box scores, injury reports and prices, and the models refit on every new box score each run; drift flags are reviewed weekly before any adjustment is made."]}
     return out
 

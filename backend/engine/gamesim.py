@@ -37,9 +37,11 @@ LEAGUE = {"catch_rate": 0.65, "ypr": 10.8, "ypc": 4.3, "int_rate": 0.023, "td_ra
 # share goes to the players who are playing instead of to "other". Found in the 2026 W7 NE-CHI review (Swift got 22 of 30
 # carries with Monangai out; the sim gave him 12). Better simulated log loss for carries, rushing and receiving in every
 # season 2021-2026, and a larger blend gain.
+# catch_adj / ypt_adj / ypc_adj: league-wide efficiency correction (catch rate, yards per target, yards per carry) learned
+# from recent finished weeks (efficiency_factor); used only where run() found it beat the uncorrected simulation.
 PARAMS = {"alpha_tgt": 12.0, "alpha_car": 10.0, "k_rec": 0.6, "k_rush": 0.5, "vol_sd": 0.2, "pass_slope": 0.0, "rush_slope": 0.0,
           "script_sd": 0.0, "other_min_tgt": 0.02, "other_min_car": 0.04, "pass_adj": 1.0, "rush_adj": 1.0,
-          "fill_car": 1.0, "fill_tgt": 1.0}
+          "fill_car": 1.0, "fill_tgt": 1.0, "catch_adj": 1.0, "ypt_adj": 1.0, "ypc_adj": 1.0}
 
 SIM_MARKETS = ["pass_yards", "pass_attempts", "completions", "pass_tds", "interceptions", "rush_yards", "carries",
                "rec_yards", "receptions", "rush_rec_yards"]
@@ -57,9 +59,13 @@ def _dirichlet_multinomial(rng, n: np.ndarray, shares: np.ndarray, alpha: float)
     return rng.multinomial(n.astype(np.int64), p)
 
 
-def simulate_team(rows: pd.DataFrame, rng, n: int = N_SIMS, params: dict | None = None) -> dict[str, dict[str, np.ndarray]]:
+TEAM = "_team"
+
+
+def simulate_team(rows: pd.DataFrame, rng, n: int = N_SIMS, params: dict | None = None,
+                  with_team: bool = False) -> dict[str, dict[str, np.ndarray]]:
     """Simulate one team's game n times. rows: that team's players for the week (props.build_frame columns).
-    Returns {player_id: {stat: (n,) samples}}."""
+    Returns {player_id: {stat: (n,) samples}}, plus {TEAM: team attempts, carries, targets} when with_team."""
     P = {**PARAMS, **(params or {})}
     r0 = rows.iloc[0]
     # Game script: the expected margin moves pass/run volume; how far the game actually strays from it (script_sd)
@@ -79,6 +85,14 @@ def simulate_team(rows: pd.DataFrame, rng, n: int = N_SIMS, params: dict | None 
     team_tgt_ratio = float(r0.get("team_targets_pg") or 31.0) / max(float(r0.get("team_attempts_pg") or 33.0), 1.0)
     att = rng.poisson(np.maximum(team_att * P["pass_adj"] * vol * np.exp(P["pass_slope"] * margin / 14.0), 1.0))
     car = rng.poisson(np.maximum(team_car * P["rush_adj"] * vol * np.exp(P["rush_slope"] * margin / 14.0), 1.0))
+    # Post-game re-simulation (engine/simreview.py) sets the team's real pass attempts, carries and targets.
+    exact = {k: _num([r0.get(k)], np.nan)[0] for k in ("att_exact", "car_exact", "tgt_exact")}
+    if np.isfinite(exact["att_exact"]):
+        att = np.full(n, int(round(exact["att_exact"])))
+        if np.isfinite(exact["tgt_exact"]):
+            team_tgt_ratio = exact["tgt_exact"] / max(exact["att_exact"], 1.0)
+    if np.isfinite(exact["car_exact"]):
+        car = np.full(n, int(round(exact["car_exact"])))
     implied = float(r0.get("team_implied_total") or 22.0)
     out: dict[str, dict[str, np.ndarray]] = {}
 
@@ -101,10 +115,10 @@ def simulate_team(rows: pd.DataFrame, rng, n: int = N_SIMS, params: dict | None 
         else:
             r = rows.iloc[i]
             m_rec = _num([r.get("opp_receptions_mult")], 1.0)[0] / max(_num([r.get("opp_targets_mult")], 1.0)[0], 0.5)
-            cr = float(np.clip(_num([r.get("catch_rate")], LEAGUE["catch_rate"])[0] * m_rec, 0.2, 0.95))
+            cr = float(np.clip(_num([r.get("catch_rate")], LEAGUE["catch_rate"])[0] * m_rec * P["catch_adj"], 0.2, 0.95))
             base_ypr = _num([r.get("ypt")], 7.5)[0] / max(_num([r.get("catch_rate")], LEAGUE["catch_rate"])[0], 0.2)
             m_yds = _num([r.get("opp_rec_yards_mult")], 1.0)[0] / max(_num([r.get("opp_receptions_mult")], 1.0)[0], 0.5)
-            ypr = max(base_ypr * m_yds, 2.0)
+            ypr = max(base_ypr * m_yds * P["ypt_adj"] / P["catch_adj"], 2.0)
         rec = rng.binomial(t, cr)
         yds = np.where(rec > 0, rng.gamma(np.maximum(rec, 1) * P["k_rec"], ypr / P["k_rec"]), 0.0)
         tot_rec += rec
@@ -125,7 +139,7 @@ def simulate_team(rows: pd.DataFrame, rng, n: int = N_SIMS, params: dict | None 
     for j, i in enumerate(rush_idx):
         r = rows.iloc[i]
         ypc = max(_num([r.get("ypc")], LEAGUE["ypc"])[0] * _num([r.get("opp_rush_yards_mult")], 1.0)[0]
-                  / max(_num([r.get("opp_carries_mult")], 1.0)[0], 0.5), 1.0)
+                  / max(_num([r.get("opp_carries_mult")], 1.0)[0], 0.5) * P["ypc_adj"], 1.0)
         c_ = cars[:, j]
         yds = np.where(c_ > 0, rng.gamma(np.maximum(c_, 1) * P["k_rush"], ypc / P["k_rush"]), 0.0)
         d = out.setdefault(r.player_id, {})
@@ -141,12 +155,19 @@ def simulate_team(rows: pd.DataFrame, rng, n: int = N_SIMS, params: dict | None 
         ints = rng.poisson(att * int_rate * _num([q.get("opp_interceptions_mult")], 1.0)[0])
         tds = rng.poisson(att * td_rate * _num([q.get("opp_pass_tds_mult")], 1.0)[0] * (implied / 22.5) ** 0.8
                           * np.exp(0.04 * margin / 14.0))
+        # Post-game re-simulation with the real efficiency: his actual TD and interception rate per attempt.
+        if np.isfinite(_num([q.get("td_rate_exact")], np.nan)[0]):
+            tds = rng.poisson(att * float(q.get("td_rate_exact")))
+        if np.isfinite(_num([q.get("int_rate_exact")], np.nan)[0]):
+            ints = rng.poisson(att * float(q.get("int_rate_exact")))
         d = out.setdefault(q.player_id, {})
         d |= {"attempts": att.astype(float), "completions": tot_rec, "pass_yards": tot_yds, "pass_tds": tds.astype(float),
               "interceptions": ints.astype(float)}
     for d in out.values():
         if "rec_yards" in d or "rush_yards" in d:
             d["rush_rec_yards"] = d.get("rec_yards", 0.0) + d.get("rush_yards", 0.0)
+    if with_team:  # the team's own volume, so the post-game review can compare it with what really happened
+        out[TEAM] = {"attempts": att.astype(float), "carries": car.astype(float), "targets": tgts.sum(axis=1).astype(float)}
     return out
 
 
@@ -178,6 +199,39 @@ def volume_factor(frame: pd.DataFrame, season: int, week: int, k: int = 4) -> di
             "rush_adj": round(1 + (f("team_carries", "team_carries_pg") - 1) * w, 4)}
 
 
+# Efficiency corrections and the markets each is judged on (the stat it moves most directly).
+CORRECTIONS = {"catch_adj": ("receptions", "completions"), "ypt_adj": ("rec_yards", "pass_yards"), "ypc_adj": ("rush_yards",)}
+
+
+def efficiency_factor(frame: pd.DataFrame, season: int, week: int, k: int = 4) -> dict:
+    """How far real catch rate, yards per target and yards per carry ran from the players' pregame inputs over the last k
+    finished weeks of this season (only weeks before `week`), shrunk toward 1 the same way as volume_factor. These are
+    the efficiency inputs the post-game re-simulation checks; run() decides whether correcting them helps."""
+    lab = frame[(frame.labelled == 1) & (frame.season == season) & (frame.week < week) & frame.has_history.eq(1)]
+    wk = sorted(lab.week.unique())[-k:]
+    g = lab[lab.week.isin(wk)]
+    if g.empty:
+        return {key: 1.0 for key in CORRECTIONS}
+    num = lambda col: pd.to_numeric(g[col], errors="coerce").fillna(0.0)  # noqa: E731
+    tg, ca = num("targets"), num("carries")
+
+    def ratio(actual, expected):
+        e = float(expected.sum())
+        return float(actual.sum()) / e if e > 0 else 1.0
+    w = len(wk) / (len(wk) + 2.0)
+    raw = {"catch_adj": ratio(num("receptions"), tg * num("catch_rate")),
+           "ypt_adj": ratio(num("rec_yards"), tg * num("ypt")),
+           "ypc_adj": ratio(num("rush_yards"), ca * num("ypc"))}
+    return {key: round(1 + (v - 1) * w, 4) for key, v in raw.items()}
+
+
+def week_params(frame: pd.DataFrame, season: int, week: int, corrections=()) -> dict:
+    """What the pregame simulation of a week learns from the weeks before it: the volume correction always, and each
+    efficiency correction that was adopted."""
+    eff = efficiency_factor(frame, season, week) if corrections else {}
+    return {**volume_factor(frame, season, week), **{key: v for key, v in eff.items() if key in corrections}}
+
+
 def _logit(p):
     p = np.clip(np.asarray(p, float), 0.005, 0.995)  # same clip as the site's pOver
     return np.log(p / (1 - p))
@@ -203,13 +257,13 @@ def _ll(y, p):
     return -(y * np.log(p) + (1 - y) * np.log(1 - p))
 
 
-def sim_over(frame: pd.DataFrame, bt: pd.DataFrame, weeks, n=N_SIMS, params=None) -> pd.DataFrame:
+def sim_over(frame: pd.DataFrame, bt: pd.DataFrame, weeks, n=N_SIMS, params=None, corrections=()) -> pd.DataFrame:
     """Simulated chance of the over at each backtest row's reference line, one week at a time, pregame features only."""
     lab = frame[frame.labelled == 1]
     out = []
     for s, w in weeks:
         rows = lab[(lab.season == s) & (lab.week == w)]
-        sims = simulate_week(rows, n, seed=s * 100 + w, params={**(params or {}), **volume_factor(frame, s, w)})
+        sims = simulate_week(rows, n, seed=s * 100 + w, params={**(params or {}), **week_params(frame, s, w, corrections)})
         b = bt[(bt.season == s) & (bt.week == w)].copy()
         p = np.full(len(b), np.nan)
         for k, r in enumerate(b.itertuples(index=False)):
@@ -284,15 +338,53 @@ def blend_test(D: pd.DataFrame, first_eval: int = 2022) -> dict:
     return res
 
 
+def correction_test(frame: pd.DataFrame, bt: pd.DataFrame, weeks, n: int = 1000, log=print) -> dict:
+    """Walk-forward check of each efficiency correction: the same weeks simulated with and without it (same random
+    draws), judged by log loss on the markets it moves. Adopted only when the 90% interval of the gain, resampled by
+    week, is above zero; otherwise the next simulation leaves that input alone."""
+    keys = list(CORRECTIONS)
+    a = sim_over(frame, bt, weeks, n=n)
+    b = sim_over(frame, bt, weeks, n=n, corrections=keys)
+    D = a.assign(p_fix=b.p_sim.to_numpy()).dropna(subset=["p_sim", "p_fix"])
+    out = {}
+    for key, markets in CORRECTIONS.items():
+        e = D[D.market.isin(markets)]
+        if e.empty:
+            continue
+        gain = _ll(e.y, e.p_sim) - _ll(e.y, e.p_fix)
+        wk = gain.groupby([e.season, e.week]).sum().to_numpy()
+        nwk = e.groupby(["season", "week"]).size().to_numpy()
+        rng = np.random.default_rng(2)
+        boots = [wk[i].sum() / nwk[i].sum() for i in (rng.integers(0, len(wk), len(wk)) for _ in range(300))]
+        lo, hi = np.percentile(boots, [5, 95])
+        out[key] = {"markets": list(markets), "n": int(len(e)), "weeks": int(len(wk)), "gain": float(gain.mean()),
+                    "gain_ci90": [float(lo), float(hi)], "adopt": bool(lo > 0)}
+        log(f"gamesim correction {key}: gain {gain.mean():+.4f} ci90 [{lo:+.4f},{hi:+.4f}] adopt={lo > 0}")
+    return out
+
+
+CORRECTION_SEASONS = 2   # the correction test looks at the most recent seasons only (it reruns every update)
+
+
+def adopted_corrections(rep: dict | None = None) -> list[str]:
+    rep = latest() if rep is None else rep
+    return [k for k, r in ((rep or {}).get("corrections") or {}).items() if r.get("adopt")]
+
+
 def run(c, frame: pd.DataFrame | None = None, log=print, n: int = 2000) -> dict:
     """Walk-forward test of the simulation on every backtest week, then the blend weights for markets where it helped.
-    Rerun each update, so the weights keep learning from every newly finished week."""
+    Rerun each update, so the weights keep learning from every newly finished week. First the efficiency corrections
+    the post-game review measures are tested on recent weeks; the ones that help are used in every simulation after."""
     frame = props.build_frame(c) if frame is None else frame
     bt = _backtest_rows(c)
     weeks = bt[["season", "week"]].drop_duplicates().sort_values(["season", "week"]).values.tolist()
+    recent = [w for w in weeks if w[0] > max(s for s, _ in weeks) - CORRECTION_SEASONS] if weeks else []
+    log(f"gamesim: testing efficiency corrections on {len(recent)} recent weeks")
+    corrections = correction_test(frame, bt, recent, log=log) if recent else {}
+    use = [k for k, r in corrections.items() if r["adopt"]]
     log(f"gamesim: simulating {len(weeks)} past weeks, {n} runs per game")
-    D = sim_over(frame, bt, weeks, n=n).dropna(subset=["p_sim"])
-    rep = {"created_at": utcnow(), "sims_per_game": n, "params": PARAMS, "markets": blend_test(D)}
+    D = sim_over(frame, bt, weeks, n=n, corrections=use).dropna(subset=["p_sim"])
+    rep = {"created_at": utcnow(), "sims_per_game": n, "params": PARAMS, "corrections": corrections, "markets": blend_test(D)}
     for m, r in rep["markets"].items():
         if r["adopt"]:
             r["weights"] = fit_weights(D[D.market == m])
@@ -409,9 +501,14 @@ def attach(c, frame: pd.DataFrame, season: int, week: int, run_id: str, log=prin
     rs_ = rows["report_status"] if "report_status" in rows else pd.Series(index=rows.index, dtype=object)
     out_ = (st_.notna() & st_.ne("ACT")) | rs_.isin(props.PASS_ON)
     rows = rows[~out_]
-    adj = volume_factor(frame, season, week)
+    adj = week_params(frame, season, week, adopted_corrections(rep))
     sims = simulate_week(rows, n, seed=season * 100 + week, params=adj)
-    log(f"gamesim: league volume correction from recent weeks: passes x{adj['pass_adj']}, carries x{adj['rush_adj']}")
+    log(f"gamesim: corrections from recent weeks: " + ", ".join(f"{k} x{v}" for k, v in adj.items()))
+    try:  # frozen at kickoff for the post-game re-simulation; never stops the site
+        from . import simreview  # noqa: PLC0415
+        simreview.freeze(c, rows, season, week, adj, n=n, log=log)
+    except Exception as ex:  # noqa: BLE001
+        log(f"simreview: pregame sims not frozen ({ex})")
     qs = np.arange(1, 100)
     updates, count = [], {}
     for r in c.execute("SELECT market, player_id, team, dist FROM prop_projections WHERE run_id=? AND calibrated=1", (run_id,)).fetchall():
