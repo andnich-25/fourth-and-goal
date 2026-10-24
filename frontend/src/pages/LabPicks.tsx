@@ -50,8 +50,9 @@ export default function LabPicks() {
 
       <Card><CardBody className="space-y-1.5 text-xs text-muted">
         <p><b className="text-fg">How the list is made.</b> Each sport offers only the picks it already features: NFL and NBA props from confidence tiers that hit 50%+ on unseen games
-          (6.0+ out of 10, which is a 60%+ chance), and college bets rated 7+ (the band that beat the books in testing). They are ranked by that rating out of 10;
-          ties go to a real sportsbook line, then to the tier's tested record. One pick per game and per player, so the list is not ten bets on one game.</p>
+          (6.0+ out of 10, which is a 60%+ chance), and college bets rated 7+ (the band that beat the books in testing). Each sport rates out of 10 on its own scale
+          (NFL and NBA: the chance it hits; college: the value at the price), so the sports take turns: each sport's best pick first, then each sport's second best, and so on,
+          with the higher rating first within a turn. Ties go to a real sportsbook line, then to the tier's tested record. One pick per game and per player.</p>
         <p>The list refreshes with each sport's data (latest box scores, injury reports and lines). A pick on the list when its game starts is frozen exactly as shown and graded after the final.
           Research, not betting advice. No pick is guaranteed.</p>
       </CardBody></Card>

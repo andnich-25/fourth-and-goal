@@ -10,7 +10,7 @@ const pick = (o: Partial<LabPick>): LabPick => ({
 const sports = { nfl: { loaded: true, candidates: 0 }, nba: { loaded: true, candidates: 0 }, cfb: { loaded: true, candidates: 0 } };
 
 describe("rankBoard", () => {
-  it("ranks best first, one per game and per player, numbered from 1", () => {
+  it("lets the sports take turns, best first within each round, one per game and per player", () => {
     const b = rankBoard([
       pick({ id: "a", score: 6.4, game_id: "1", player_id: "p1" }),
       pick({ id: "b", score: 7.1, game_id: "1", player_id: "p2" }),
@@ -20,6 +20,10 @@ describe("rankBoard", () => {
       pick({ id: "f", score: 6.9, game_id: "4", player_id: "p4" }),
     ]);
     expect(b.map((p) => [p.id, p.rank])).toEqual([["c", 1], ["b", 2], ["f", 3], ["e", 4]]);
+    const mixed = rankBoard([pick({ id: "c1", sport: "cfb", score: 9.7, game_id: "1" }), pick({ id: "c2", sport: "cfb", score: 9.5, game_id: "2" }),
+      pick({ id: "n1", sport: "nfl", score: 8.7, game_id: "3", player_id: "1" }), pick({ id: "n2", sport: "nfl", score: 6.1, game_id: "4", player_id: "2" }),
+      pick({ id: "n3", sport: "nfl", score: 6.0, game_id: "5", player_id: "3" })]);
+    expect(mixed.map((p) => p.id)).toEqual(["c1", "n1", "c2", "n2", "n3"]);
   });
   it("stops at 10 and returns fewer when fewer qualify", () => {
     expect(rankBoard(Array.from({ length: 14 }, (_, i) => pick({ game_id: String(i), player_id: String(i) }))).length).toBe(10);

@@ -154,17 +154,25 @@ export function byStrength(a: LabPick, b: LabPick): number {
     || (b.tier_rate ?? 0) - (a.tier_rate ?? 0) || b.chance - a.chance;
 }
 
-/** The top picks, one per game and one per player, numbered 1 (strongest) down. Fewer than n when fewer qualify. */
+/** The top picks, one per game and one per player, numbered 1 (strongest) down. Fewer than n when fewer qualify.
+ *  Each sport scores out of 10 on its own scale (NFL and NBA: the chance; college: the value at the price), so the
+ *  sports take turns: round 1 is each sport's best pick, round 2 each sport's second best, and so on; within a round
+ *  the higher rating goes first. A sport that runs out of proven picks leaves its turns to the others. */
 export function rankBoard(cands: LabPick[], n = BOARD_SIZE): LabPick[] {
   const games = new Set<string>(), players = new Set<string>();
-  const out: LabPick[] = [];
+  const lists = new Map<Sport, LabPick[]>();
   for (const c of [...cands].sort(byStrength)) {
     const g = `${c.sport}:${c.game_id}`, pl = c.player_id ? `${c.sport}:${c.player_id}` : "";
     if (games.has(g) || (pl && players.has(pl))) continue;
     games.add(g);
     if (pl) players.add(pl);
-    out.push({ ...c, rank: out.length + 1 });
-    if (out.length === n) break;
+    lists.set(c.sport, [...(lists.get(c.sport) ?? []), c]);
+  }
+  const out: LabPick[] = [];
+  for (let round = 0; out.length < n; round++) {
+    const turn = [...lists.values()].map((l) => l[round]).filter(Boolean).sort(byStrength);
+    if (!turn.length) break;
+    for (const c of turn) if (out.length < n) out.push({ ...c, rank: out.length + 1 });
   }
   return out;
 }
