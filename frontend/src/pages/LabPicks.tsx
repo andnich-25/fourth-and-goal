@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Trophy } from "lucide-react";
 import { STATIC } from "@/lib/api";
 import { chicago, cn, pct } from "@/lib/format";
-import { SPORTS, SPORT_LABEL, type LabBoard, type LabPick, type LabRecord, type Sport } from "@/lib/lab";
+import { SPORTS, SURE, SPORT_LABEL, type LabBoard, type LabPick, type LabRecord, type Sport } from "@/lib/lab";
 import { PageTitle } from "@/components/Layout";
 import { Badge, Card, CardBody, CardHeader, LoadingBlock, Notice, Segmented } from "@/components/ui";
 import { WriteUp } from "@/components/WriteUp";
@@ -34,8 +34,8 @@ export default function LabPicks() {
     <div className="space-y-5">
       <PageTitle kicker={b ? `Updated ${chicago(b.generated_at)}` : "Every sport"} title={`The Lab's top 10: ${SPORT_LABEL[sport]}`} />
       <p className="-mt-3 max-w-3xl text-sm text-muted">
-        Each sport's plays most likely to win, ranked by their chance to hit: #1 is the surest. Only picks with a 70%+ chance from 5,000-game
-        simulations and tested tiers make it. Tap a pick for the full write-up.
+        Each sport's 10 plays most likely to win, ranked by their chance to hit from 5,000-game simulations: #1 is the surest. Picks at 70%+
+        are marked sure plays. Tap a pick for the full write-up.
       </p>
       <Segmented label="Sport" value={sport} onChange={(v) => setSp({ sport: v }, { replace: true })}
         options={SPORTS.map((s) => ({ value: s, label: `${SPORT_LABEL[s]}${b ? ` · ${b.board.filter((p) => p.sport === s).length}` : ""}` }))} />
@@ -56,9 +56,10 @@ export default function LabPicks() {
 
       <Card><CardBody className="space-y-1.5 text-xs text-muted">
         <p><b className="text-fg">How the list is made.</b> Each sport has its own list. It draws only on the picks that sport already features: NFL and NBA props from confidence tiers that hit 50%+ on unseen games,
-          and college bets rated 7+. Of those, only picks with a 70%+ chance to hit make the list (simulated, then calibrated against how similar picks really did), ranked by that
-          chance, highest first. Ties go to a real sportsbook line, then to the tier's tested record. One pick per game and per player. Most college bets land near 55%, so
-          they rarely make it. Even a 90% pick loses 1 time in 10: the "tested" figure on each pick is how often its tier actually hit on games the models never saw.</p>
+          and in college, each game's favorite to win outright plus bets rated 7+. The 10 with the best chance to hit make the list (simulated, then calibrated against how similar
+          picks really did), highest first, and 70%+ picks are marked sure plays. Ties go to a real sportsbook line, then to the tier's tested record. One pick per game and per player.
+          When the books' feed carries alternate lines (a paid odds plan), they count too: only lines a book posts, priced -500 or longer, that the sims give a better chance than the price implies.
+          College spreads and totals are set near 50/50, so they top out around 55%; the surest college picks are big favorites to win, which pay little. Even a 90% pick loses 1 time in 10: the "tested" figure on each pick is how often its tier actually hit on games the models never saw.</p>
         <p>The list refreshes with each sport's data (latest box scores, injury reports and lines). A pick on the list when its game starts is frozen exactly as shown and graded after the final.
           Research, not betting advice. No pick is guaranteed.</p>
       </CardBody></Card>
@@ -82,6 +83,7 @@ function PickRow({ p, open, onToggle }: { p: LabPick; open: boolean; onToggle: (
         </div>
         <div className="shrink-0 text-right">
           <div><span className="font-display text-xl font-bold">{pct(p.chance, 0)}</span> <span className="text-xs text-muted">to hit</span></div>
+          {p.chance >= SURE && !p.result && <div className="text-[11px] font-semibold text-accent">Sure play</div>}
           {p.price != null && <div className="text-xs text-muted">{price(p.price)}{p.book ? ` ${p.book}` : ""}</div>}
           {p.result ? <ResultBadge p={p} /> : p.tier && <div className="text-[11px] text-muted">{p.tier}{p.tier_rate != null ? ` · ${pct(p.tier_rate, 0)} tested` : ""}</div>}
         </div>

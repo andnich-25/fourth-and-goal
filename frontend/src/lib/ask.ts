@@ -213,6 +213,32 @@ export function anyPool(d: AskData, f: Filters = {}, markets?: string[], onePerP
 /** Suggestions only use legs from tiers that proved 50%+ on unseen weeks. */
 export const isProven = (d: AskData, p: Pick) => proven(d.conf, p.kind, p.p);
 
+/** Shortest alternate-line price taken: past -500 the line pays too little to be worth buying it down. */
+export const ALT_MIN_PRICE = -500;
+
+/** Each player's likeliest alternate line (paid odds plan only): a line a book posts as an alternate, priced -500 or
+ *  longer, that the model gives a better chance than the price implies. Lines come only from the books' feed. */
+export function altPool(d: AskData, f: Filters = {}): Pick[] {
+  const best = new Map<string, Pick>();
+  for (const m of Object.keys(d.props)) {
+    for (const r of d.props[m]?.rows ?? []) {
+      if (!r.eligible || !r.dist || !propPlays(d, r, m)) continue;
+      if (!keep(d, f, { pos: r.position, team: r.team, opp: r.opponent, game_id: r.game_id })) continue;
+      for (const side of ["over", "under"] as const) {
+        for (const o of d.feed.get(m, r.player_id, side)) {
+          if (!o.alt || o.line == null || o.price < ALT_MIN_PRICE) continue;
+          const p = propPick(d, m, r, o.line, side);
+          if (p.price == null || p.p <= 1 / dec(p.price)) continue;
+          const alt = { ...p, id: `${p.id}:alt:${side}:${o.line}`, label: `${p.label} (alt line)`, lineSource: "book" as const };
+          const b = best.get(r.player_id);
+          if (!b || alt.p > b.p) best.set(r.player_id, alt);
+        }
+      }
+    }
+  }
+  return [...best.values()].sort((a, b) => b.p - a.p);
+}
+
 /** A pick as a parlay-builder slip leg, with every loaded book price for that exact side and line. */
 export function slipLeg(d: AskData, p: Pick) {
   const prices: Record<string, string> = {};

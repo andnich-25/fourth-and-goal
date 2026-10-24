@@ -105,6 +105,7 @@ def live_lines(today: str) -> dict:
     books: dict = {}
     tts: dict = {}
     prs: dict = {}
+    alts: dict = {}
     fetched: dict = {}
     day = datetime.fromisoformat(today)
     for i in range(6, -1, -1):
@@ -122,6 +123,10 @@ def live_lines(today: str) -> dict:
             tts.setdefault(t["game_id"], []).append(t)
         for p in s.get("props", []):
             prs.setdefault(p["game_id"], []).append(p)
+        got = {}
+        for l in s.get("alt_lines", []):
+            got.setdefault(l["game_id"], []).append(l)
+        alts.update(got)
     out = {}
     for gid in set(espn) | set(books):
         e = espn.get(gid, {})
@@ -144,12 +149,44 @@ def live_lines(today: str) -> dict:
             "source": f"{len({l['book'] for l in ls})} sportsbooks" if use_books else espn_src,
             "fetched_at": fetched.get(gid) if use_books else (espn_at or fetched.get(gid)),
             "books_at": fetched.get(gid),
-            "offers": ls, "team_totals": tts.get(gid, []), "props": prs.get(gid, []),
+            "offers": ls, "team_totals": tts.get(gid, []), "props": prs.get(gid, []), "alts": alts.get(gid, []),
             "home_rank": e.get("home_rank"), "away_rank": e.get("away_rank"), "tv": e.get("tv"),
             "espn_spread": e.get("home_spread"), "espn_home_id": e.get("home_id"), "espn_away_id": e.get("away_id"),
         }
         out[gid] = row
     return out
+
+
+ALT_MIN_CHANCE = 0.6
+ALT_MAX_PRICE = -1000   # past about -1000 a book's alternate line pays almost nothing
+
+
+def alt_rows(offers: list[dict], margin: np.ndarray, pts: np.ndarray, calib: dict) -> list[dict]:
+    """Every alternate spread and total the books post for one game, priced by its 5,000 simulated scores: the best
+    price per line, the sim's chance, the book's implied chance, and how sims at that chance did at moved lines in
+    testing. Only lines at ALT_MIN_CHANCE+ and priced no shorter than ALT_MAX_PRICE are kept, likeliest first."""
+    best: dict = {}
+    for o in offers:
+        k = (o["market"], o["side"], float(o["point"]))
+        if k not in best or history.decimal(np.array([o["price"]]))[0] > history.decimal(np.array([best[k]["price"]]))[0]:
+            best[k] = o
+    out = []
+    for (market, side, point), o in best.items():
+        if market == "spreads" and side in ("home", "away"):
+            x, line, over, mk = margin, -point if side == "home" else point, side == "home", "spread"
+        elif market == "totals" and side in ("over", "under"):
+            x, line, over, mk = pts, point, side == "over", "total"
+        else:
+            continue
+        p = float(report.side_chance(x[None, :], np.array([line]), np.array([over]))[0])
+        if not np.isfinite(p) or p < ALT_MIN_CHANCE or o["price"] < ALT_MAX_PRICE:
+            continue
+        t = tier_of(calib.get(mk, []), p)
+        out.append({"market": mk, "side": side, "line": point, "price": int(o["price"]), "book": o["book"], "chance": p,
+                    "implied": float(history.implied(np.array([o["price"]], float))[0]),
+                    "tested_rate": t["rate"] if t else None, "tested_n": t["n"] if t else None,
+                    "tested_recent": t["recent_rate"] if t else None})
+    return sorted(out, key=lambda r: -r["chance"])
 
 
 def _best(offers: list[dict], **match) -> dict | None:
@@ -723,6 +760,7 @@ def run(out: Path, log=print, today: str | None = None, now: datetime | None = N
     legs = rating.legs_from_backtest(bt)
     rater = rating.fit(legs)
     rating_report = rating.bands(rating.walk_forward(legs), summary["recent_seasons"])
+    alt_report = report.alt_lines(oos)
     log(f"cfb rating: " + ", ".join(f"{b['lo']}+ {b['roi']:+.1%} (n={b['n']})" for b in rating_report["bands"] if b["n"]))
     finds = report.findings(g)
     for m, v in summary["markets"].items():
@@ -753,6 +791,11 @@ def run(out: Path, log=print, today: str | None = None, now: datetime | None = N
         ch = model.chances(h, a, sp, tot, up.tt_home.fillna(0).to_numpy(), up.tt_away.fillna(0).to_numpy())
         qb = qb_changes(props.load_player_games(sources.CURRENT_SEASON), sources.CURRENT_SEASON)
         rows = game_rows(up, ch, summary, lines, qb, rater)
+        idx = {gid: i for i, gid in enumerate(up.game_id)}
+        for r in rows:
+            i = idx.get(r["game_id"])
+            offers = lines.get(r["game_id"], {}).get("alts", [])
+            r["alts"] = alt_rows(offers, h[i] - a[i], h[i] + a[i], alt_report["markets"]) if offers and i is not None else []
         for r in rows:
             for m in r["markets"]:
                 m["reasons"] = reasons(r, m)
@@ -778,7 +821,7 @@ def run(out: Path, log=print, today: str | None = None, now: datetime | None = N
                                        "no_line": sum(1 for r in rows if not r["line"]["has_line"])}})
     _write(out, "sims.json", {"generated_at": utcnow(), "n": PARLAY_SIMS, "games": sims})
     _write(out, "props.json", {"generated_at": utcnow(), "rows": props_rows, "backtest": prop_tiers})
-    _write(out, "backtest.json", {**summary, "opening_totals": opening, "upsets": upset, "rating": rating_report,
+    _write(out, "backtest.json", {**summary, "opening_totals": opening, "upsets": upset, "rating": rating_report, "alt_lines": alt_report,
                                   "coefficients": coefs,
                                   "model": {"ratings_half_life_days": model.RATINGS[0][3],
                                             "recency_half_life_seasons": model.RECENCY_HALF_LIFE, "sims": model.SIMS}})

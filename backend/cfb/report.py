@@ -163,6 +163,59 @@ def summarize(bt: pd.DataFrame) -> dict:
     return out
 
 
+ALT_SHIFTS = (3, 7, 10, 14)
+ALT_BINS = (0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 1.0)
+
+
+def side_chance(x: np.ndarray, line: np.ndarray, over: np.ndarray) -> np.ndarray:
+    """Chance that simulated values x (games x sims) land on the chosen side of each game's line, pushes left out."""
+    line = np.asarray(line, float)[:, None]
+    over = np.asarray(over, bool)[:, None]
+    win = np.where(over, x > line, x < line).mean(1)
+    loss = np.where(over, x < line, x > line).mean(1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return win / (win + loss)
+
+
+def alt_lines(oos: pd.DataFrame, first: int = BACKTEST_FIRST) -> dict:
+    """Do the sims stay honest at alternate lines? Every backtest game's closing spread and total is moved ALT_SHIFTS
+    points toward the model's side (buying points, as an alternate line does), the 5,000-game sims price the new line,
+    and the chances are grouped and checked against what happened. Prices for past alternate lines are not archived,
+    so this tests the chance only, not the return."""
+    test = oos[(oos.season >= first) & oos.spread.notna() & oos.total.notna()]
+    parts = []
+    for i, (_, grp) in enumerate(test.groupby(model.week_key(test), sort=True)):
+        pool = model.miss_pool(oos, grp.date.min() - pd.Timedelta(hours=6))
+        h, a = model.simulate(grp.pred_home.to_numpy(), grp.pred_away.to_numpy(), pool, seed=i)
+        for market, x, actual, line in (("spread", h - a, grp.margin.to_numpy(float), -grp.spread.to_numpy(float)),
+                                        ("total", h + a, grp.pts.to_numpy(float), grp.total.to_numpy(float))):
+            lean = (x > line[:, None]).mean(1) >= 0.5
+            for k in ALT_SHIFTS:
+                alt = np.where(lean, line - k, line + k)
+                res = np.where(lean, np.sign(actual - alt), np.sign(alt - actual))
+                parts.append(pd.DataFrame({"market": market, "p": side_chance(x, alt, lean), "res": res,
+                                           "season": grp.season.to_numpy()}))
+    if not parts:
+        return {"shifts": list(ALT_SHIFTS), "markets": {}}
+    d = pd.concat(parts)
+    d = d[(d.res != 0) & d.p.notna()]
+    d["won"] = (d.res > 0).astype(int)
+    seasons = sorted(int(s) for s in d.season.unique())
+    recent = seasons[-2:]
+    out = {}
+    for market, x in d.groupby("market"):
+        rows = []
+        for lo, hi in zip(ALT_BINS[:-1], ALT_BINS[1:]):
+            b = x[(x.p >= lo) & (x.p < (hi if hi < 1 else 2))]
+            r = b[b.season.isin(recent)]
+            rows.append({"lo": lo, "hi": hi, "n": int(len(b)), "hits": int(b.won.sum()),
+                         "avg_chance": float(b.p.mean()) if len(b) else None, "rate": float(b.won.mean()) if len(b) else None,
+                         "ci": _wilson(int(b.won.sum()), len(b)), "recent_n": int(len(r)),
+                         "recent_rate": float(r.won.mean()) if len(r) else None})
+        out[market] = rows
+    return {"shifts": list(ALT_SHIFTS), "first_season": seasons[0], "recent_seasons": recent, "markets": out}
+
+
 def opening_totals(oos: pd.DataFrame, bt: pd.DataFrame) -> dict | None:
     """Same total leans graded against the opening total instead of the close (books' first number of the week)."""
     b = bt[bt.total_open.notna()] if "total_open" in bt else pd.DataFrame()

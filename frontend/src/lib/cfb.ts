@@ -31,7 +31,15 @@ export type CfbGame = {
   /** The underdog's side of the game: model win chance vs the market's (vig removed). pick = the proven moneyline value bet is on the dog. */
   upset?: { team: string; side: "home" | "away"; p: number; market: number | null; price: number | null; pick: boolean } | null;
   notes?: string[];
+  /** Alternate spreads and totals the books post (paid odds plan), priced by the 5,000 sims, likeliest first. */
+  alts?: AltLine[];
 };
+export type AltLine = { market: "spread" | "total"; side: "home" | "away" | "over" | "under"; line: number; price: number; book: string;
+  chance: number; implied: number; tested_rate: number | null; tested_n: number | null; tested_recent: number | null };
+/** How the sims did at moved lines in testing: closing spreads and totals moved 3-14 points toward the model's side. */
+export type AltReport = { shifts: number[]; first_season?: number; recent_seasons?: number[];
+  markets: Partial<Record<"spread" | "total", { lo: number; hi: number; n: number; hits: number; avg_chance: number | null; rate: number | null;
+    recent_n: number; recent_rate: number | null }[]>> };
 export type BookLine = { book: string; spread?: Partial<Record<"home" | "away", [number | null, number]>>;
   total?: Partial<Record<"over" | "under", [number | null, number]>>; ml?: Partial<Record<"home" | "away", [number | null, number]>> };
 export type CfbPick = Lean & { game_id: number; date: string; home: string; away: string };
@@ -47,6 +55,7 @@ export type Backtest = {
   model: { ratings_half_life_days: number; recency_half_life_seasons: number; sims: number };
   upsets?: Upsets;
   rating?: RatingReport | null;
+  alt_lines?: AltReport;
 };
 export type RatingBand = { lo: number; hi: number; n: number; win: number | null; roi: number | null; recent_n: number; recent_roi: number | null };
 export type RatingReport = { bands: RatingBand[]; by_market: Record<string, RatingBand[]>; first_season: number; recent_seasons: number[] };

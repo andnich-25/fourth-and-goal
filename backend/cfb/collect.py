@@ -15,7 +15,9 @@ NBA daily game lines. College football takes:
     where the totals model did best in testing) and on Saturday morning (near-closing lines for grading);
   * team totals for up to FEATURED games (1 credit a game) on Saturday;
   * player props (passing, rushing, receiving yards and receptions: 4 credits a game) for the top featured game on the
-    free plan and every featured game on a paid plan.
+    free plan and every featured game on a paid plan;
+  * alternate spreads and totals (every point a book offers, 2 credits a game) on Saturday: every game on a paid plan,
+    and on the free plan only the first CFB_ALT_GAMES featured games (default 0, since the free plan is spoken for).
 About 12 credits a week. Nothing is bought if it would leave fewer than CFB_ODDS_RESERVE (default 200) credits, so the
 NFL pull is never starved. ESPN's lines fill in every other day and every other game for free.
 """
@@ -40,6 +42,7 @@ ODDS_API = "https://api.the-odds-api.com/v4/sports/americanfootball_ncaaf"
 GAME_MARKETS = ("h2h", "spreads", "totals")
 PROP_MARKETS = {"pass_yds": "player_pass_yds", "rush_yds": "player_rush_yds", "rec_yds": "player_reception_yds",
                 "receptions": "player_receptions"}
+ALT_MARKETS = {"alternate_spreads": "spreads", "alternate_totals": "totals"}
 FEATURED = 4
 FREE_PLAN_RESERVE = 200
 PAID_PLAN_RESERVE = 1000
@@ -252,7 +255,7 @@ def plan_budget(remaining: float | None, used: float | None, n_games: int, n_fea
                 mode: str = "auto", have_lines_this_week: bool = False) -> dict:
     """Decide what today's pull may spend. Never spends below the reserve that protects the NFL weekly pull."""
     if remaining is None:
-        return {"plan": "unknown", "game_lines": False, "team_totals": 0, "props": 0, "reason": "credit balance unavailable"}
+        return {"plan": "unknown", "game_lines": False, "team_totals": 0, "props": 0, "alt": 0, "reason": "credit balance unavailable"}
     allowance = remaining + (used or 0)
     paid = allowance > PAID_PLAN_MIN
     reserve = float(os.environ.get("CFB_ODDS_RESERVE", PAID_PLAN_RESERVE if paid else FREE_PLAN_RESERVE))
@@ -269,12 +272,15 @@ def plan_budget(remaining: float | None, used: float | None, n_games: int, n_fea
     n_props = (min(n_featured, FEATURED) if (paid or mode == "always") else min(n_featured, 1)) if want_props else 0
     while n_props and left - n_props * len(PROP_MARKETS) < reserve:
         n_props -= 1
+    left -= n_props * len(PROP_MARKETS)
+    n_alt = (n_games if paid else min(n_featured, int(os.environ.get("CFB_ALT_GAMES", "0") or 0))) if featured_day else 0
+    n_alt = int(max(0, min(n_alt, (left - reserve) // len(ALT_MARKETS))))
     reason = ("no games this week" if n_games == 0 else
               "not a line day (Tuesday and Saturday)" if not lines_day else
               f"would drop below the {reserve:.0f}-credit reserve" if not lines else "ok")
     return {"plan": "paid" if paid else "free", "allowance": allowance, "reserve": reserve, "game_lines": lines,
-            "team_totals": tt, "props": n_props,
-            "cost": (lines_cost if lines else 0) + tt + n_props * len(PROP_MARKETS), "reason": reason}
+            "team_totals": tt, "props": n_props, "alt": n_alt,
+            "cost": (lines_cost if lines else 0) + tt + n_props * len(PROP_MARKETS) + n_alt * len(ALT_MARKETS), "reason": reason}
 
 
 def match_team(name: str, teams: dict[str, int]) -> int | None:
@@ -314,9 +320,10 @@ def fetch_odds(day: str, key: str, week_games: list[dict], featured: list[int], 
     budget = plan_budget(remaining, used, len(games), len(feat_events), datetime.fromisoformat(day).weekday(), mode,
                          have_lines_this_week)
     log(f"cfb odds: {len(games)} games matched this week; plan {budget['plan']}, {remaining} credits remaining; "
-        f"lines {'yes' if budget['game_lines'] else 'no'}, team totals {budget['team_totals']}, props {budget['props']} "
+        f"lines {'yes' if budget['game_lines'] else 'no'}, team totals {budget['team_totals']}, props {budget['props']}, "
+        f"alternate lines {budget['alt']} "
         f"({budget['reason']})")
-    lines, team_totals, props, errors = [], [], [], []
+    lines, team_totals, props, alt_lines, errors = [], [], [], [], []
     ev = {g["event_id"]: g for g in games}
     if budget["game_lines"]:
         try:
@@ -337,12 +344,16 @@ def fetch_odds(day: str, key: str, week_games: list[dict], featured: list[int], 
                                           "point": o.get("point"), "price": o.get("price"), "updated": m.get("last_update")})
         except urllib.error.HTTPError as ex:
             errors.append(f"game lines: HTTP {ex.code}")
-    for i, g in enumerate(feat_events):
+    # featured games first, so the free plan's few alternate-line games are the featured ones
+    order = feat_events + [g for g in games if g not in feat_events]
+    for i, g in enumerate(order):
         markets = []
-        if i < budget["team_totals"]:
+        if i < len(feat_events) and i < budget["team_totals"]:
             markets.append("team_totals")
-        if i < budget["props"]:
+        if i < len(feat_events) and i < budget["props"]:
             markets += list(PROP_MARKETS.values())
+        if i < budget["alt"]:
+            markets += list(ALT_MARKETS)
         if not markets:
             continue
         try:
@@ -356,6 +367,14 @@ def fetch_odds(day: str, key: str, week_games: list[dict], featured: list[int], 
         for b in data.get("bookmakers", []):  # type: ignore[union-attr]
             for m in b.get("markets", []):
                 for o in m.get("outcomes", []):
+                    if m["key"] in ALT_MARKETS:
+                        if o.get("price") is None or o.get("point") is None:
+                            continue
+                        side = ("home" if o.get("name") == g["home"] else "away" if o.get("name") == g["away"]
+                                else str(o.get("name", "")).lower())
+                        alt_lines.append({"game_id": g["game_id"], "book": b["key"], "market": ALT_MARKETS[m["key"]], "side": side,
+                                          "point": o["point"], "price": int(o["price"])})
+                        continue
                     side = str(o.get("name", "")).lower()
                     if side not in ("over", "under") or o.get("price") is None:
                         continue
@@ -369,7 +388,7 @@ def fetch_odds(day: str, key: str, week_games: list[dict], featured: list[int], 
                                       "player": o.get("description") or "", "book": b["key"], "side": side,
                                       "line": o.get("point"), "price": int(o["price"])})
     return {"date": day, "fetched_at": utcnow(), "source": "The Odds API (the-odds-api.com), US books", "budget": budget,
-            "games": games, "game_lines": lines, "team_totals": team_totals, "props": props, "errors": errors,
+            "games": games, "game_lines": lines, "team_totals": team_totals, "props": props, "alt_lines": alt_lines, "errors": errors,
             "credits_remaining": remaining}
 
 
@@ -420,7 +439,7 @@ def save_odds(day: str, log=print, force: bool = False, now: datetime | None = N
     except Exception as ex:  # noqa: BLE001 - prices are optional
         log(f"cfb odds: not fetched ({ex})")
         return {"error": str(ex)}
-    if not (snap["game_lines"] or snap["props"] or snap["team_totals"]) and not snap["errors"]:
+    if not (snap["game_lines"] or snap["props"] or snap["team_totals"] or snap["alt_lines"]) and not snap["errors"]:
         return {"skipped": snap["budget"]["reason"], "credits_remaining": snap["credits_remaining"]}
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(snap))
