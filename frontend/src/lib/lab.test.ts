@@ -77,7 +77,7 @@ describe("advance", () => {
     expect(s2.frozen[0].result).toBe("won");
     const b = publish(s2, sports);
     expect(b.record.won).toBe(1);
-    expect(b.notes.nba).toMatch(/No pick reaches/);
+    expect(b.notes.nba).toMatch(/No games/);
     expect(publish(s2, { ...sports, nba: { loaded: true, candidates: 3 } }).notes.nba).toMatch(/already started/);
   });
 });
@@ -95,7 +95,7 @@ const nbaRow = (id: string, game: number, mu: number, line: number, extra: Parti
 });
 
 describe("nbaCandidates", () => {
-  it("keeps only proven, 70%+ leans of rotation players who are not out, each with a write-up", () => {
+  it("keeps proven leans of rotation players who are not out, each with a write-up", () => {
     const tier = (name: string, lo: number, hi: number, rate: number) => ({ tier: name, lo, hi, n: 1000, hits: 0, rate, avg_chance: null, ci: [null, null] as [null, null] });
     const conf = { props: { first_season: 2022, tiers: [tier("Coin flip", 0.5, 0.55, 0.5), tier("Lean", 0.55, 0.6, 0.56), tier("Strong", 0.6, 1, 0.68)],
       by_side: { over: [], under: [] }, note: "", by_market: [] } } as NbaConfidence;
@@ -103,6 +103,7 @@ describe("nbaCandidates", () => {
       games: [{ game_id: 1, date: "2026-10-24", home: "NY", away: "BOS", time: "2026-10-24T23:30:00Z" }],
       rows: [nbaRow("1", 1, 28, 21.5), nbaRow("2", 1, 20, 19.5), nbaRow("3", 1, 28, 21.5, { out: true }), nbaRow("4", 1, 28, 21.5, { evidence: { ...nbaRow("4", 1, 1, 1).evidence, minutes_long: 12 } })] };
     const c = nbaCandidates(slate, { conf });
+    // row 2 is a coin flip (an unproven tier), so it stays off even without a chance floor
     expect(c.map((p) => p.player_id)).toEqual(["1"]);
     expect(c[0].chance).toBeGreaterThanOrEqual(0.7);
     expect(c[0].tier).toBe("Strong");
