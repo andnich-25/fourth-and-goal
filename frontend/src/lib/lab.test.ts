@@ -22,6 +22,15 @@ describe("rankBoard", () => {
     // a high college value rating does not lift a 66% pick above more likely ones
     expect(b.map((p) => [p.id, p.rank])).toEqual([["b", 1], ["f", 2], ["e", 3], ["c", 4]]);
   });
+  it("gives each sport its own top 10", () => {
+    const cands = ["nfl", "cfb", "nba"].flatMap((sp) => Array.from({ length: 12 }, (_, i) => pick({ sport: sp as LabPick["sport"], id: `${sp}${i}`, game_id: String(i), player_id: String(i), chance: 0.7 + i / 100 })));
+    const s = advance({ updated_at: null, board: [], frozen: [] }, cands, {}, new Date("2026-10-20T00:00:00Z"));
+    for (const sp of ["nfl", "cfb", "nba"]) {
+      const l = s.board.filter((p) => p.sport === sp);
+      expect(l.map((p) => p.rank)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      expect(l[0].id).toBe(`${sp}11`);
+    }
+  });
   it("stops at 10 and returns fewer when fewer qualify", () => {
     expect(rankBoard(Array.from({ length: 14 }, (_, i) => pick({ game_id: String(i), player_id: String(i) }))).length).toBe(10);
     expect(rankBoard([pick({})]).length).toBe(1);
@@ -68,7 +77,7 @@ describe("advance", () => {
     expect(s2.frozen[0].result).toBe("won");
     const b = publish(s2, sports);
     expect(b.record.won).toBe(1);
-    expect(b.note).toMatch(/Only 0 picks/);
+    expect(b.notes.nba).toMatch(/No pick reaches/);
   });
 });
 

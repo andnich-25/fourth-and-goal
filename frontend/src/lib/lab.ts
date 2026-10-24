@@ -15,6 +15,8 @@ import { pct0, tidy, type Section } from "./writeup";
 
 export type Sport = "nfl" | "nba" | "cfb";
 export const SPORT_LABEL: Record<Sport, string> = { nfl: "NFL", nba: "NBA", cfb: "CFB" };
+/** Each sport has its own top 10, in this order on the page. */
+export const SPORTS: Sport[] = ["nfl", "cfb", "nba"];
 export type LabResult = "won" | "lost" | "push" | "void";
 
 export type LabPick = {
@@ -156,7 +158,7 @@ export function byStrength(a: LabPick, b: LabPick): number {
     || (b.tier_rate ?? 0) - (a.tier_rate ?? 0) || b.score - a.score;
 }
 
-/** The top picks, one per game and one per player, numbered 1 (most likely to hit) down. Fewer than n when fewer qualify. */
+/** One sport's top picks, one per game and one per player, numbered 1 (most likely to hit) down. Fewer than n when fewer qualify. */
 export function rankBoard(cands: LabPick[], n = BOARD_SIZE): LabPick[] {
   const games = new Set<string>(), players = new Set<string>();
   const out: LabPick[] = [];
@@ -213,7 +215,8 @@ export function grade(p: LabPick, res: Results): { result: LabResult; actual: st
 export type LabState = { updated_at: string | null; board: LabPick[]; frozen: LabPick[] };
 export type LabRecord = { n: number; won: number; lost: number; push: number; void: number; rate: number | null };
 export type LabBoard = {
-  generated_at: string; board: LabPick[]; note: string | null;
+  /** Every sport's top 10 together; rank is within the pick's sport. notes: why a sport's list is short. */
+  generated_at: string; board: LabPick[]; notes: Record<Sport, string | null>;
   sports: Record<Sport, { loaded: boolean; candidates: number }>;
   record: LabRecord & { by_sport: Record<Sport, LabRecord>; since: string | null };
   recent: LabPick[];
@@ -226,7 +229,8 @@ export function advance(prev: LabState, cands: LabPick[], res: Results, now: Dat
   const known = new Set(prev.frozen.map((p) => p.id));
   const frozen = [...prev.frozen, ...prev.board.filter((p) => started(p) && !known.has(p.id)).map((p) => ({ ...p, frozen_at: at }))]
     .map((p) => { if (p.result) return p; const g = grade(p, res); return g ? { ...p, ...g } : p; });
-  return { updated_at: now.toISOString(), board: rankBoard(cands.filter((c) => !started(c))), frozen };
+  const open = cands.filter((c) => !started(c));
+  return { updated_at: now.toISOString(), board: SPORTS.flatMap((sp) => rankBoard(open.filter((c) => c.sport === sp))), frozen };
 }
 
 export function tally(ps: LabPick[]): LabRecord {
@@ -237,12 +241,16 @@ export function tally(ps: LabPick[]): LabRecord {
 
 export function publish(s: LabState, sports: LabBoard["sports"], recentN = 30): LabBoard {
   const settled = s.frozen.filter((p) => p.result);
-  const by = Object.fromEntries((["nfl", "nba", "cfb"] as Sport[]).map((sp) => [sp, tally(settled.filter((p) => p.sport === sp))])) as Record<Sport, LabRecord>;
-  const n = s.board.length;
+  const by = Object.fromEntries(SPORTS.map((sp) => [sp, tally(settled.filter((p) => p.sport === sp))])) as Record<Sport, LabRecord>;
+  const note = (sp: Sport) => {
+    const n = s.board.filter((p) => p.sport === sp).length;
+    return n >= BOARD_SIZE ? null : !n ? "No pick reaches a 70% chance from a proven tier right now."
+      : `Only ${n} ${n === 1 ? "pick reaches" : "picks reach"} the 70%+ bar right now, so the list stops at ${n} instead of being padded with weaker plays.`;
+  };
   return {
     generated_at: s.updated_at ?? new Date().toISOString(), board: s.board, sports,
-    note: n < BOARD_SIZE ? `Only ${n} ${n === 1 ? "pick reaches" : "picks reach"} the 70%+ bar right now, so the list stops at ${n} instead of being padded with weaker plays.` : null,
+    notes: Object.fromEntries(SPORTS.map((sp) => [sp, note(sp)])) as Record<Sport, string | null>,
     record: { ...tally(settled), by_sport: by, since: s.frozen.length ? s.frozen.map((p) => p.kickoff).sort()[0] : null },
-    recent: [...s.frozen].sort((a, b) => b.kickoff.localeCompare(a.kickoff)).slice(0, recentN),
+    recent: SPORTS.flatMap((sp) => s.frozen.filter((p) => p.sport === sp).sort((a, b) => b.kickoff.localeCompare(a.kickoff)).slice(0, recentN)),
   };
 }
