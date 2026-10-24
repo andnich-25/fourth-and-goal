@@ -78,6 +78,7 @@ describe("advance", () => {
     const b = publish(s2, sports);
     expect(b.record.won).toBe(1);
     expect(b.notes.nba).toMatch(/No pick reaches/);
+    expect(publish(s2, { ...sports, nba: { loaded: true, candidates: 3 } }).notes.nba).toMatch(/already started/);
   });
 });
 

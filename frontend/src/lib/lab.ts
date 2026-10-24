@@ -244,7 +244,9 @@ export function publish(s: LabState, sports: LabBoard["sports"], recentN = 30): 
   const by = Object.fromEntries(SPORTS.map((sp) => [sp, tally(settled.filter((p) => p.sport === sp))])) as Record<Sport, LabRecord>;
   const note = (sp: Sport) => {
     const n = s.board.filter((p) => p.sport === sp).length;
-    return n >= BOARD_SIZE ? null : !n ? "No pick reaches a 70% chance from a proven tier right now."
+    // candidates counts qualifying picks before started games are dropped: some, but none left, means they have all started
+    return n >= BOARD_SIZE ? null : !n && sports[sp]?.candidates ? "Every pick that qualified has already started. The next list posts with this sport's next refresh."
+      : !n ? "No pick reaches a 70% chance from a proven tier right now."
       : `Only ${n} ${n === 1 ? "pick reaches" : "picks reach"} the 70%+ bar right now, so the list stops at ${n} instead of being padded with weaker plays.`;
   };
   return {
