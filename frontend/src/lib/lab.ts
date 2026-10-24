@@ -3,7 +3,7 @@
    every number is one that sport published; this file only chooses, ranks, freezes and grades.
    The board is built by scripts/lab-picks.ts on each site refresh: a pick on the board when its game starts is
    frozen as shown and graded after the final, so the record is never written with hindsight. */
-import { anyPool, gameLabel, isProven, answerWhy, type AskData, type Pick } from "./ask";
+import { ALT_MIN_PRICE, altPool, anyPool, gameLabel, isProven, answerWhy, type AskData, type Pick } from "./ask";
 import { easternToUtc } from "./static";
 import { bestOffer, leanOf, marketLabel, MIN_LINE, nbaTier, type NbaRow, type Slate } from "./nba";
 import type { AskContext as NbaCtx } from "./nbaAsk";
@@ -33,9 +33,9 @@ export type LabPick = {
   rank?: number; frozen_at?: string; result?: LabResult; actual?: string;
 };
 
-/** Only the most confident picks: a 70%+ chance to hit (inside the top "Strong" band of each sport's tested tiers), on top of each
- *  sport's own proven rule. College picks must also be rated 7+; their calibrated chance is what counts here. */
-export const MIN_CHANCE = 0.7;
+/** Each sport lists its 10 likeliest picks; 70%+ is called out as a sure play. Picks are still limited to each
+ *  sport's own pool (proven NFL and NBA tiers; college: favorites to win outright and bets rated 7+). */
+export const SURE = 0.7;
 export const BOARD_SIZE = 10;
 const RISKY = new Set(["Questionable", "Doubtful", "Out"]);
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -43,7 +43,8 @@ const lc = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
 /* ------------------------------------------------------------------ NFL */
 
-/** The NFL's proven picks (Strongest picks on the home page): one per player, tier proven on unseen weeks, 6.0+. */
+/** The NFL's proven picks (Strongest picks on the home page) plus alternate lines when the books' feed has them: one
+ *  per player, tier proven on unseen weeks. */
 export function nflCandidates(d: AskData): LabPick[] {
   const kick = new Map<string, string>();
   const status = new Map<string, string>();
@@ -51,7 +52,7 @@ export function nflCandidates(d: AskData): LabPick[] {
     if (r.game_id && !kick.has(r.game_id)) { const k = easternToUtc(r.gameday, r.gametime); if (k) kick.set(r.game_id, k); }
     if (r.features?.report_status) status.set(r.player_id, String(r.features.report_status));
   }
-  return anyPool(d).filter((p) => isProven(d, p) && p.p >= MIN_CHANCE && !RISKY.has(status.get(p.player_id) ?? "") && kick.has(p.game_id))
+  return [...anyPool(d), ...altPool(d)].filter((p) => isProven(d, p) && !RISKY.has(status.get(p.player_id) ?? "") && kick.has(p.game_id))
     .map((p) => nflPick(d, p, kick.get(p.game_id)!));
 }
 
@@ -91,7 +92,7 @@ export function nbaCandidates(slate: Slate, ctx: NbaCtx): LabPick[] {
   for (const r of slate.rows) {
     if (r.out || r.evidence.minutes_long < 20 || r.line < MIN_LINE || !games.has(r.game_id)) continue;
     const lean = leanOf(r);
-    if (!lean || lean.p < MIN_CHANCE) continue;
+    if (!lean) continue;
     const t = nbaTier(ctx.conf, lean.p);
     if (!t || t.tier === "Coin flip" || t.rate == null || t.rate < 0.5) continue;
     out.push(nbaPick(r, lean.side, lean.p, t, games.get(r.game_id)!, ctx));
@@ -116,18 +117,88 @@ function nbaPick(r: NbaRow, side: "over" | "under", p: number, t: NonNullable<Re
 
 export type CfbCtx = { teams?: Team[]; bt?: Backtest; props?: CfbPropRow[] };
 
-/** College football's top picks (the home page list): each game's single best bet, rated 7+ in a proven market. */
+/** College football's likeliest picks: per game, the higher chance of the model's favorite to win outright (5,000
+ *  simulations) and the game's best bet when it rates 7+. Spreads and totals sit near 50/50 by design, so the
+ *  favorites usually win out. */
 export function cfbCandidates(week: Week, ctx: CfbCtx): LabPick[] {
-  const seen = new Set<number>();
-  const out: LabPick[] = [];
-  for (const p of [...week.picks].sort((a, b) => b.score - a.score)) {
-    if (!cfbIsPick(p) || seen.has(p.game_id) || (p.fair_p ?? p.p) < MIN_CHANCE) continue;
-    const g = week.games.find((x) => x.game_id === p.game_id);
-    if (!g) continue;
-    seen.add(p.game_id);
-    out.push(cfbPick(p, g, ctx));
+  const best = new Map<number, LabPick>();
+  const keep = (x: LabPick) => { const b = best.get(Number(x.game_id)); if (!b || x.chance > b.chance) best.set(Number(x.game_id), x); };
+  for (const g of week.games) {
+    const f = cfbFavorite(g, ctx); if (f) keep(f);
+    const a = cfbAlt(g, ctx); if (a) keep(a);
   }
-  return out;
+  for (const p of week.picks) {
+    const g = week.games.find((x) => x.game_id === p.game_id);
+    if (g && cfbIsPick(p)) keep(cfbPick(p, g, ctx));
+  }
+  return [...best.values()];
+}
+
+/** The model's favorite to win outright, at the best posted moneyline. The model's win chances are calibrated: the
+ *  backtest's games are grouped by the underdog's chance, so the favorite's record is the rest of each group. */
+function cfbFavorite(g: Week["games"][number], ctx: CfbCtx): LabPick | null {
+  const home = g.model.home_win >= 0.5;
+  const side = home ? "home" : "away", team = home ? g.home : g.away;
+  const chance = home ? g.model.home_win : 1 - g.model.home_win;
+  const offers = (g.books ?? []).map((b) => ({ book: b.book, price: b.ml?.[side]?.[1] })).filter((o): o is { book: string; price: number } => o.price != null);
+  const top = offers.sort((a, b) => dec(b.price) - dec(a.price))[0];
+  const price = top?.price ?? (home ? g.line.ml_home : g.line.ml_away);
+  if (!g.line.has_line || price == null) return null;
+  const bin = ctx.bt?.upsets?.calibration.find((c) => 1 - chance >= c.lo && 1 - chance < c.hi);
+  const implied = 1 / dec(price);
+  const bet = `${team} to win (ML ${fmtPrice(price)})`;
+  return {
+    id: `cfb:${g.game_id}:moneyline:${team}`, sport: "cfb", game_id: String(g.game_id), kickoff: g.date, matchup: `${g.away} at ${g.home}`,
+    bet, who: team, market: "moneyline", market_label: "Moneyline", side, line: null, line_source: "book",
+    price, book: top ? cfbBook(top.book) : null, score: r1(chance * 10), chance,
+    tier: "Favorite", tier_rate: bin ? 1 - bin.actual : null, tier_n: bin?.n ?? null,
+    headline: `${team} wins ${pct0(chance)} of 5,000 simulated games${bin ? `; favorites the model gave ${pct0(1 - bin.hi)}–${pct0(1 - bin.lo)} won ${pct0(1 - bin.actual)} of ${bin.n.toLocaleString()} past games` : ""}.`,
+    sections: tidy([
+      { title: "The pick", lines: [
+        `${team} to win outright: ${pct0(chance)} of 5,000 simulated games.`,
+        `Best price ${fmtPrice(price)}${top ? ` at ${cfbBook(top.book)}` : ""}, which implies ${pct0(implied)}. A favorite this big pays little: $100 returns ${(100 * (dec(price) - 1)).toFixed(0)} in profit.`,
+        bin ? `In testing (${(bin.n).toLocaleString()} games where the model gave the underdog ${pct0(bin.lo)}–${pct0(bin.hi)}), the favorite won ${pct0(1 - bin.actual)}; the model had said ${pct0(1 - bin.model)}.` : "",
+        "Moneyline favorites are a likely win, not a proven money-maker: the betting edge The Lab found in testing is on underdogs and totals.",
+      ] },
+      ...explainGame(g, ctx, {}),
+    ]),
+    link: `/cfb/game/${g.game_id}`,
+  };
+}
+const dec = (american: number) => 1 + (american > 0 ? american / 100 : 100 / -american);
+const altShifts = (ctx: CfbCtx) => { const s = ctx.bt?.alt_lines?.shifts ?? []; return s.length ? `${Math.min(...s)} to ${Math.max(...s)}` : "several"; };
+
+/** The game's likeliest alternate spread or total: a line a book posts, priced -500 or longer, that the sims give a
+ *  better chance than the price implies, and whose chance band held up at moved lines in testing (60%+ overall and
+ *  over the last two seasons). */
+function cfbAlt(g: Week["games"][number], ctx: CfbCtx): LabPick | null {
+  const a = (g.alts ?? []).filter((x) => x.price >= ALT_MIN_PRICE && x.chance > x.implied && (x.tested_rate ?? 0) >= 0.6 && (x.tested_recent ?? 0) >= 0.6)
+    .sort((x, y) => y.chance - x.chance)[0];
+  if (!a) return null;
+  const spread = a.market === "spread";
+  const team = a.side === "home" ? g.home : g.away;
+  const main = spread ? (g.line.spread == null ? null : a.side === "home" ? g.line.spread : -g.line.spread) : g.line.total;
+  const sgn = (v: number) => (v > 0 ? `+${v}` : String(v));
+  const bet = spread ? `${team} ${sgn(a.line)} (alt spread)` : `${a.side === "over" ? "Over" : "Under"} ${a.line} (alt total)`;
+  const bins = ctx.bt?.alt_lines?.markets[a.market] ?? [];
+  const bin = bins.find((b) => a.chance >= b.lo && a.chance < (b.hi < 1 ? b.hi : 2));
+  const moved = main == null ? "" : spread ? ` instead of the main line ${sgn(main)}` : ` instead of the main total ${main}`;
+  return {
+    id: `cfb:${g.game_id}:alt:${a.market}:${a.side}:${a.line}`, sport: "cfb", game_id: String(g.game_id), kickoff: g.date, matchup: `${g.away} at ${g.home}`,
+    bet, who: spread ? team : bet, market: a.market, market_label: spread ? "Alt spread" : "Alt total",
+    side: a.side, line: a.line, line_source: "book", price: a.price, book: cfbBook(a.book),
+    score: r1(a.chance * 10), chance: a.chance, tier: "Alt line", tier_rate: a.tested_rate, tier_n: a.tested_n,
+    headline: `Hits in ${pct0(a.chance)} of 5,000 simulated games${moved}; sims at this chance hit ${pct0(a.tested_rate!)} of ${(a.tested_n ?? 0).toLocaleString()} tested lines.`,
+    sections: tidy([
+      { title: "The pick", lines: [
+        `${bet}: ${pct0(a.chance)} of 5,000 simulated games${moved}.`,
+        `Best price ${fmtPrice(a.price)} at ${cfbBook(a.book)}, which implies ${pct0(a.implied)}; the sims make it ${pct0(a.chance)}. $100 returns ${(100 * (dec(a.price) - 1)).toFixed(0)} in profit.`,
+        bin ? `In testing, closing ${spread ? "spreads" : "totals"} were moved ${altShifts(ctx)} points toward the model's side and priced by the sims: lines given ${pct0(bin.lo)}–${pct0(Math.min(bin.hi, 1))} hit ${pct0(bin.rate!)} of ${bin.n.toLocaleString()}${bin.recent_rate != null ? ` (${pct0(bin.recent_rate)} over the last two seasons)` : ""}. Past alternate prices are not archived, so this tests the chance, not the return.` : "",
+      ] },
+      ...explainGame(g, ctx, { market: a.market }),
+    ]),
+    link: `/cfb/game/${g.game_id}`,
+  };
 }
 
 function cfbPick(p: CfbPick, g: Week["games"][number], ctx: CfbCtx): LabPick {
@@ -244,8 +315,10 @@ export function publish(s: LabState, sports: LabBoard["sports"], recentN = 30): 
   const by = Object.fromEntries(SPORTS.map((sp) => [sp, tally(settled.filter((p) => p.sport === sp))])) as Record<Sport, LabRecord>;
   const note = (sp: Sport) => {
     const n = s.board.filter((p) => p.sport === sp).length;
-    return n >= BOARD_SIZE ? null : !n ? "No pick reaches a 70% chance from a proven tier right now."
-      : `Only ${n} ${n === 1 ? "pick reaches" : "picks reach"} the 70%+ bar right now, so the list stops at ${n} instead of being padded with weaker plays.`;
+    // candidates counts qualifying picks before started games are dropped: some, but none left, means they have all started
+    return n >= BOARD_SIZE ? null : !n && sports[sp]?.candidates ? "Every pick that qualified has already started. The next list posts with this sport's next refresh."
+      : !n ? "No games with posted lines are left on the board right now."
+      : `Only ${n} ${n === 1 ? "pick is" : "picks are"} on the board right now (one per game and per player, from games that have not started).`;
   };
   return {
     generated_at: s.updated_at ?? new Date().toISOString(), board: s.board, sports,

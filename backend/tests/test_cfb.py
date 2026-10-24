@@ -18,8 +18,16 @@ def test_budget_keeps_the_reserve_and_buys_lines_on_tuesday_and_saturday():
     low = collect.plan_budget(202, 298, 60, 3, weekday=5)
     assert not low["game_lines"] and low["cost"] == 0
     paid = collect.plan_budget(19000, 1000, 60, 4, weekday=5)
-    assert paid["plan"] == "paid" and paid["props"] == 4
+    assert paid["plan"] == "paid" and paid["props"] == 4 and paid["alt"] == 60
+    assert sat["alt"] == 0 and tue["alt"] == 0 and collect.plan_budget(19000, 1000, 60, 4, weekday=1)["alt"] == 0
     assert not collect.plan_budget(None, None, 60, 3, 5)["game_lines"]
+
+
+def test_free_plan_buys_alternate_lines_only_when_asked_and_above_the_reserve(monkeypatch):
+    monkeypatch.setenv("CFB_ALT_GAMES", "4")
+    sat = collect.plan_budget(480, 20, n_games=60, n_featured=3, weekday=5)
+    assert sat["alt"] == 3 and sat["cost"] == 3 + 3 + 4 + 3 * 2
+    assert collect.plan_budget(213, 287, n_games=60, n_featured=3, weekday=5)["alt"] == 1   # 3 credits left above the reserve
 
 
 def test_team_names_match_the_longest_school():
@@ -235,3 +243,25 @@ def test_upset_drivers_counts_how_often_the_dog_was_ahead():
                       "home_to": [0] * 60 + [1] * 60, "away_to": [2] * 60 + [1] * 60})
     d = report.upset_drivers(g)
     assert d["upsets"] == 60 and d["rows"][0]["upsets"] == 1.0 and d["rows"][0]["others"] == 0.0
+
+
+def test_alternate_lines_are_priced_by_the_sims_at_the_best_price():
+    rng = np.random.default_rng(0)
+    margin = rng.normal(14, 10, 5000).round()   # home by about two touchdowns
+    pts = rng.normal(50, 12, 5000).round()
+    calib = {"spread": [{"lo": 0.8, "hi": 0.85, "n": 900, "rate": 0.82, "recent_rate": 0.81},
+                        {"lo": 0.85, "hi": 1.0, "n": 300, "rate": 0.84, "recent_rate": 0.84}]}
+    offers = [{"market": "spreads", "side": "home", "point": -3.5, "price": -400, "book": "draftkings"},
+              {"market": "spreads", "side": "home", "point": -3.5, "price": -350, "book": "fanduel"},
+              {"market": "spreads", "side": "away", "point": 3.5, "price": 280, "book": "fanduel"},
+              {"market": "spreads", "side": "home", "point": 10.5, "price": -5000, "book": "fanduel"},
+              {"market": "totals", "side": "over", "point": 35.5, "price": -450, "book": "betmgm"}]
+    rows = pipeline.alt_rows(offers, margin, pts, calib)
+    home = next(r for r in rows if r["market"] == "spread")
+    assert home["side"] == "home" and home["price"] == -350 and home["book"] == "fanduel"
+    assert abs(home["chance"] - (margin > 3.5).mean() / ((margin > 3.5).mean() + (margin < 3.5).mean())) < 1e-9
+    assert home["tested_rate"] == 0.84 and abs(home["implied"] - 350 / 450) < 1e-9
+    assert not any(r["side"] == "away" for r in rows)                  # 14% chance: dropped
+    assert not any(r["price"] == -5000 for r in rows)                  # priced past -1000: dropped
+    assert any(r["market"] == "total" and r["side"] == "over" and r["tested_rate"] is None for r in rows)
+    assert [r["chance"] for r in rows] == sorted((r["chance"] for r in rows), reverse=True)
