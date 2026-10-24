@@ -52,8 +52,9 @@ jobs:
           restore-keys: nfl-site-
 
       # Every pick the site suggests is saved before kickoff and graded after the game (engine/picklog.py), and so is
-      # The Lab's top 10 (frontend/scripts/lab-picks.ts, on every run). The saved picks must survive between runs,
-      # so they live on the nfl-data branch.
+      # The Lab's top 10 (frontend/scripts/lab-picks.ts, on every run). Each game's simulation is frozen at kickoff too
+      # (sims/, engine/simreview.py) and re-run after the final with what really happened. The saved picks and sims must
+      # survive between runs, so they live on the nfl-data branch.
       - name: Check out the nfl-data branch (created on the first run)
         run: |
           if git ls-remote --exit-code --heads origin nfl-data >/dev/null; then

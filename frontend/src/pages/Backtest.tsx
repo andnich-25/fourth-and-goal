@@ -9,6 +9,7 @@ import type { CalBin, Gate, ProbMetrics, TopN, TopPolicy } from "@/lib/types";
 import { PageTitle } from "@/components/Layout";
 import { TuningCard } from "@/components/TuningCard";
 import { LiveRecordCard } from "@/components/LiveRecord";
+import { SimReportCard } from "@/components/SimReport";
 import { Badge, Card, CardBody, CardHeader, ErrorState, LoadingBlock, Segmented, Select, Stat, TableWrap, Td, Th } from "@/components/ui";
 import { NoDataState, TierBadge } from "@/components/shared";
 
@@ -98,6 +99,7 @@ export default function BacktestPage() {
       <PageTitle kicker={`${d.test_weeks.length} weeks the model never saw · ${d.test_weeks[0]?.[0]}–${d.test_weeks.at(-1)?.[0]}`} title="Track record" />
       <PlainSummary tp={d.topn[promoted ?? "fg-logit-1"]} weeks={d.test_weeks.length} />
       <LiveRecordCard />
+      <SimReportCard />
       <Card>
           <CardHeader title="Top-3 hits by week" subtitle="Selected model vs shrunk-rate baseline (picks who played, max 3)"
             action={<Segmented size="sm" label="Season" value={season} onChange={setSeason} options={[{ value: "all", label: "All" }, ...[...new Set(d.test_weeks.map((x) => String(x[0])))].map((s) => ({ value: s, label: s }))]} />} />

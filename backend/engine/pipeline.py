@@ -148,7 +148,8 @@ def run_all(season=2026, download=False, force=False, steps=("sync", "build", "b
             snap = odds.maybe_fetch(c, season, log)
             res["odds"] = {"fetched_at": snap["fetched_at"], "rows": len(snap["rows"])} if snap else None
         if "picklog" in steps:
-            from . import picklog  # noqa: PLC0415
+            from . import picklog, simreview  # noqa: PLC0415
+            simreview.run(c, log)  # post-game re-simulation of every finished game frozen at kickoff
             rep = picklog.run(c, season, log)
             res["picklog"] = {"graded": rep.get("graded", 0)}
         st = status.write_build_status(c, season)
