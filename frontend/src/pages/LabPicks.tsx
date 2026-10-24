@@ -58,6 +58,7 @@ export default function LabPicks() {
         <p><b className="text-fg">How the list is made.</b> Each sport has its own list. It draws only on the picks that sport already features: NFL and NBA props from confidence tiers that hit 50%+ on unseen games,
           and in college, each game's favorite to win outright plus bets rated 7+. The 10 with the best chance to hit make the list (simulated, then calibrated against how similar
           picks really did), highest first, and 70%+ picks are marked sure plays. Ties go to a real sportsbook line, then to the tier's tested record. One pick per game and per player.
+          When the books' feed carries alternate lines (a paid odds plan), they count too: only lines a book posts, priced -500 or longer, that the sims give a better chance than the price implies.
           College spreads and totals are set near 50/50, so they top out around 55%; the surest college picks are big favorites to win, which pay little. Even a 90% pick loses 1 time in 10: the "tested" figure on each pick is how often its tier actually hit on games the models never saw.</p>
         <p>The list refreshes with each sport's data (latest box scores, injury reports and lines). A pick on the list when its game starts is frozen exactly as shown and graded after the final.
           Research, not betting advice. No pick is guaranteed.</p>

@@ -3,7 +3,7 @@
    every number is one that sport published; this file only chooses, ranks, freezes and grades.
    The board is built by scripts/lab-picks.ts on each site refresh: a pick on the board when its game starts is
    frozen as shown and graded after the final, so the record is never written with hindsight. */
-import { anyPool, gameLabel, isProven, answerWhy, type AskData, type Pick } from "./ask";
+import { ALT_MIN_PRICE, altPool, anyPool, gameLabel, isProven, answerWhy, type AskData, type Pick } from "./ask";
 import { easternToUtc } from "./static";
 import { bestOffer, leanOf, marketLabel, MIN_LINE, nbaTier, type NbaRow, type Slate } from "./nba";
 import type { AskContext as NbaCtx } from "./nbaAsk";
@@ -43,7 +43,8 @@ const lc = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
 /* ------------------------------------------------------------------ NFL */
 
-/** The NFL's proven picks (Strongest picks on the home page): one per player, tier proven on unseen weeks. */
+/** The NFL's proven picks (Strongest picks on the home page) plus alternate lines when the books' feed has them: one
+ *  per player, tier proven on unseen weeks. */
 export function nflCandidates(d: AskData): LabPick[] {
   const kick = new Map<string, string>();
   const status = new Map<string, string>();
@@ -51,7 +52,7 @@ export function nflCandidates(d: AskData): LabPick[] {
     if (r.game_id && !kick.has(r.game_id)) { const k = easternToUtc(r.gameday, r.gametime); if (k) kick.set(r.game_id, k); }
     if (r.features?.report_status) status.set(r.player_id, String(r.features.report_status));
   }
-  return anyPool(d).filter((p) => isProven(d, p) && !RISKY.has(status.get(p.player_id) ?? "") && kick.has(p.game_id))
+  return [...anyPool(d), ...altPool(d)].filter((p) => isProven(d, p) && !RISKY.has(status.get(p.player_id) ?? "") && kick.has(p.game_id))
     .map((p) => nflPick(d, p, kick.get(p.game_id)!));
 }
 
@@ -122,7 +123,10 @@ export type CfbCtx = { teams?: Team[]; bt?: Backtest; props?: CfbPropRow[] };
 export function cfbCandidates(week: Week, ctx: CfbCtx): LabPick[] {
   const best = new Map<number, LabPick>();
   const keep = (x: LabPick) => { const b = best.get(Number(x.game_id)); if (!b || x.chance > b.chance) best.set(Number(x.game_id), x); };
-  for (const g of week.games) { const f = cfbFavorite(g, ctx); if (f) keep(f); }
+  for (const g of week.games) {
+    const f = cfbFavorite(g, ctx); if (f) keep(f);
+    const a = cfbAlt(g, ctx); if (a) keep(a);
+  }
   for (const p of week.picks) {
     const g = week.games.find((x) => x.game_id === p.game_id);
     if (g && cfbIsPick(p)) keep(cfbPick(p, g, ctx));
@@ -162,6 +166,40 @@ function cfbFavorite(g: Week["games"][number], ctx: CfbCtx): LabPick | null {
   };
 }
 const dec = (american: number) => 1 + (american > 0 ? american / 100 : 100 / -american);
+const altShifts = (ctx: CfbCtx) => { const s = ctx.bt?.alt_lines?.shifts ?? []; return s.length ? `${Math.min(...s)} to ${Math.max(...s)}` : "several"; };
+
+/** The game's likeliest alternate spread or total: a line a book posts, priced -500 or longer, that the sims give a
+ *  better chance than the price implies, and whose chance band held up at moved lines in testing (60%+ overall and
+ *  over the last two seasons). */
+function cfbAlt(g: Week["games"][number], ctx: CfbCtx): LabPick | null {
+  const a = (g.alts ?? []).filter((x) => x.price >= ALT_MIN_PRICE && x.chance > x.implied && (x.tested_rate ?? 0) >= 0.6 && (x.tested_recent ?? 0) >= 0.6)
+    .sort((x, y) => y.chance - x.chance)[0];
+  if (!a) return null;
+  const spread = a.market === "spread";
+  const team = a.side === "home" ? g.home : g.away;
+  const main = spread ? (g.line.spread == null ? null : a.side === "home" ? g.line.spread : -g.line.spread) : g.line.total;
+  const sgn = (v: number) => (v > 0 ? `+${v}` : String(v));
+  const bet = spread ? `${team} ${sgn(a.line)} (alt spread)` : `${a.side === "over" ? "Over" : "Under"} ${a.line} (alt total)`;
+  const bins = ctx.bt?.alt_lines?.markets[a.market] ?? [];
+  const bin = bins.find((b) => a.chance >= b.lo && a.chance < (b.hi < 1 ? b.hi : 2));
+  const moved = main == null ? "" : spread ? ` instead of the main line ${sgn(main)}` : ` instead of the main total ${main}`;
+  return {
+    id: `cfb:${g.game_id}:alt:${a.market}:${a.side}:${a.line}`, sport: "cfb", game_id: String(g.game_id), kickoff: g.date, matchup: `${g.away} at ${g.home}`,
+    bet, who: spread ? team : bet, market: a.market, market_label: spread ? "Alt spread" : "Alt total",
+    side: a.side, line: a.line, line_source: "book", price: a.price, book: cfbBook(a.book),
+    score: r1(a.chance * 10), chance: a.chance, tier: "Alt line", tier_rate: a.tested_rate, tier_n: a.tested_n,
+    headline: `Hits in ${pct0(a.chance)} of 5,000 simulated games${moved}; sims at this chance hit ${pct0(a.tested_rate!)} of ${(a.tested_n ?? 0).toLocaleString()} tested lines.`,
+    sections: tidy([
+      { title: "The pick", lines: [
+        `${bet}: ${pct0(a.chance)} of 5,000 simulated games${moved}.`,
+        `Best price ${fmtPrice(a.price)} at ${cfbBook(a.book)}, which implies ${pct0(a.implied)}; the sims make it ${pct0(a.chance)}. $100 returns ${(100 * (dec(a.price) - 1)).toFixed(0)} in profit.`,
+        bin ? `In testing, closing ${spread ? "spreads" : "totals"} were moved ${altShifts(ctx)} points toward the model's side and priced by the sims: lines given ${pct0(bin.lo)}–${pct0(Math.min(bin.hi, 1))} hit ${pct0(bin.rate!)} of ${bin.n.toLocaleString()}${bin.recent_rate != null ? ` (${pct0(bin.recent_rate)} over the last two seasons)` : ""}. Past alternate prices are not archived, so this tests the chance, not the return.` : "",
+      ] },
+      ...explainGame(g, ctx, { market: a.market }),
+    ]),
+    link: `/cfb/game/${g.game_id}`,
+  };
+}
 
 function cfbPick(p: CfbPick, g: Week["games"][number], ctx: CfbCtx): LabPick {
   const t = tierOf(ctx.bt?.markets[p.market], p.tier);

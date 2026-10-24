@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { advance, grade, nbaCandidates, publish, rankBoard, type LabPick } from "./lab";
+import { advance, cfbCandidates, grade, nbaCandidates, publish, rankBoard, type LabPick } from "./lab";
+import type { AltLine, CfbGame } from "./cfb";
 import type { NbaConfidence, NbaRow, Slate } from "./nba";
 
 const pick = (o: Partial<LabPick>): LabPick => ({
@@ -109,5 +110,27 @@ describe("nbaCandidates", () => {
     expect(c[0].tier).toBe("Strong");
     expect(c[0].sections.length).toBeGreaterThan(2);
     expect(c[0].kickoff).toBe("2026-10-24T23:30:00Z");
+  });
+});
+
+describe("cfbCandidates", () => {
+  const game = (o: Partial<CfbGame> = {}): CfbGame => ({
+    game_id: 7, date: "2026-10-24T19:30:00Z", week: 8, season_type: "regular", home: "Alabama", away: "Kentucky", home_id: 1, away_id: 2,
+    home_conf: "SEC", away_conf: "SEC", neutral: false, conference_game: true, venue: null, home_rank: null, away_rank: null, tv: null, featured: false,
+    line: { spread: -14.5, total: 48.5, ml_home: -700, ml_away: 500, tt_home: 31.5, tt_away: 17, tt_posted: false, source: "9 sportsbooks", fetched_at: null, has_line: true },
+    books: [], model: { home: 31, away: 17, margin: 14, total: 48, margin_q: [0, 14, 28], total_q: [35, 48, 61], home_win: 0.76, line_based: true },
+    ratings: { home: { pts_for: null, ypp: null, plays: null, games: null }, away: { pts_for: null, ypp: null, plays: null, games: null } },
+    markets: [], ...o,
+  });
+  const alt = (o: Partial<AltLine>): AltLine => ({ market: "spread", side: "home", line: -3.5, price: -350, book: "draftkings", chance: 0.86, implied: 0.78,
+    tested_rate: 0.84, tested_n: 2600, tested_recent: 0.84, ...o });
+  it("adds the likeliest alternate line that beats its price and tested well, over a less likely favorite", () => {
+    const g = game({ alts: [alt({ price: -900, chance: 0.95, implied: 0.9 }), alt({}), alt({ line: -7.5, price: -250, chance: 0.8, implied: 0.71 }),
+      alt({ market: "total", side: "over", line: 38.5, chance: 0.9, implied: 0.92, price: -500 })] });
+    const c = cfbCandidates({ generated_at: "", games: [g], picks: [], odds: { books_games: 1, espn_games: 0, no_line: 0 } }, {});
+    expect(c.map((p) => [p.bet, p.price, p.tier])).toEqual([["Alabama -3.5 (alt spread)", -350, "Alt line"]]);
+    expect(grade(c[0], { cfb: { "7": [24, 20] } })?.result).toBe("won");
+    // no alternate lines loaded: the favorite stands
+    expect(cfbCandidates({ generated_at: "", games: [game()], picks: [], odds: { books_games: 1, espn_games: 0, no_line: 0 } }, {})[0].tier).toBe("Favorite");
   });
 });

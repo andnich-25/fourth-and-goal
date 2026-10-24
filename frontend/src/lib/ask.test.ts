@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answer, anyPool, estimatedLine, parse, type AskData } from "./ask";
+import { altPool, answer, anyPool, estimatedLine, parse, type AskData } from "./ask";
 import type { RankingRow } from "./types";
 
 const row = (id: string, name: string, team: string, opp: string, pos: string, p: number, gid: string, day = "2026-10-25"): RankingRow =>
@@ -126,6 +126,19 @@ describe("ask parser", () => {
   it("builds parlays from every market unless TDs are asked for", () => {
     expect(answer(d, "Give me the best 3 leg parlay for tonights game").title).toContain("any market");
     expect(answer(d, "3 leg TD parlay").title).toContain("TD parlay");
+  });
+
+  it("takes each player's likeliest alternate line that books post at -500 or longer and that beats its price", () => {
+    const wr = { player_id: "2", player_name: "Amon-Ra St. Brown", team: "DET", opponent: "TB", position: "WR", game_id: "2026_07_TB_DET", eligible: 1,
+      median: 7, q10: 4, q90: 10, recent: [], evidence: { receptions_med: 7, snap_pct: 0.9 },
+      dist: { type: "quantiles" as const, q: Array.from({ length: 99 }, (_, i) => 3 + i * 0.08), platt: [1, 0] as [number, number] } };
+    const rows = [{ line: 6.5, price: -110 }, { line: 4.5, price: -300, alt: true }, { line: 3.5, price: -900, alt: true }, { line: 5.5, price: -150, alt: true }]
+      .map((r) => ({ ...r, market: "receptions", player_id: "2", side: "over", book: "DraftKings" }));
+    const dd: AskData = { ...d, props: { receptions: { label: "Receptions", rows: [wr] } },
+      feed: { at: "2026-10-22T01:00:00Z", get: (m, p, s) => rows.filter((r) => r.market === m && r.player_id === p && r.side === s) } };
+    const a = altPool(dd);
+    expect(a.map((p) => [p.line, p.price, p.label])).toEqual([[4.5, -300, "Over 4.5 receptions (alt line)"]]);
+    expect(a[0].p).toBeGreaterThan(0.75);
   });
 
   it("finds props at a hit rate and builds a player's ladder", () => {
